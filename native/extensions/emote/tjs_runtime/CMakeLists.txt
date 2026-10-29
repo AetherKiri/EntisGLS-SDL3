@@ -161,6 +161,10 @@ target_sources(motion_player_scene PRIVATE
     ${PLAYER_GENERATED}/EmoteWindEmitter.cpp)
 target_compile_options(motion_player_scene PRIVATE -ffunction-sections -fdata-sections)
 target_link_libraries(motion_player_scene PUBLIC motion_player_cpu)
+# Timeline evaluation in the CPU archive calls the scene's source resolver.
+# Declare the reverse dependency so CMake repeats this static-library group
+# for linkers that scan archives only once (including GNU ld).
+target_link_libraries(motion_player_cpu PRIVATE motion_player_scene)
 if(ANDROID OR STUDYSTEADY_SDL3)
     add_library(motion_gles_scene STATIC EXCLUDE_FROM_ALL
         gles_render_manager.cpp

@@ -49,7 +49,7 @@ if(APPLE)
     target_link_options(aether_entisgls_runtime PRIVATE "LINKER:-exported_symbol,_AetherEntisGLSProvider")
     set_target_properties(aether_entisgls_runtime PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE INSTALL_RPATH "@loader_path")
 elseif(UNIX)
-    target_link_options(aether_entisgls_runtime PRIVATE "LINKER:--exclude-libs,ALL")
+    target_link_options(aether_entisgls_runtime PRIVATE "LINKER:--exclude-libs,ALL" "LINKER:-z,defs")
     set_target_properties(aether_entisgls_runtime PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE INSTALL_RPATH "$ORIGIN")
 endif()
 
