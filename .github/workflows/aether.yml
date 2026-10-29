@@ -66,4 +66,3 @@ jobs:
         run: cmake --build out/entisgls --parallel 2
       - name: Run synthetic EntisGLS regressions
         run: ctest --test-dir out/entisgls --output-on-failure --no-tests=error --parallel 2
-
