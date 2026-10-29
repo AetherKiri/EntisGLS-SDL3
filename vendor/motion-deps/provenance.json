@@ -1495,6 +1495,18 @@
     "vendor/kirikiroid2/tjs_support/RenderManager_ogl_reference.cpp": {
       "source": "/Users/fenghengzhi/Developer/kirikiroid2-web/cpp/core/visual/ogl/RenderManager_ogl.cpp",
       "sha256": "9a19c01a6d49bec3b2f339272d418aafd94ecb1269239a5827bbd7235679473a"
+    },
+    "vendor/motion-deps/include/boost/config/compiler/gcc.hpp": {
+      "source": "boost-config 1.91.0 (vcpkg), include/boost/config/compiler/gcc.hpp",
+      "sha256": "5ef2cd0f45ff4f26aa1cbae67581e150a5451ce8a20ab70c411e6f0be6be5677",
+      "source_sha256": "4d72f17a36be0b38d8f7a96a21306a56f7fa8bb48ccdccaaea05c9397ee6de4d",
+      "adaptation": "Trailing whitespace normalized; code unchanged."
+    },
+    "vendor/motion-deps/include/boost/config/stdlib/libstdcpp3.hpp": {
+      "source": "boost-config 1.91.0 (vcpkg), include/boost/config/stdlib/libstdcpp3.hpp",
+      "sha256": "d9b6f40911e72c5edf88f30e3305b158cde5427711bea26833485f76f02ffa49",
+      "source_sha256": "3568e83c96b9f7fb823b9ae3f5ae0cc126ee5da3cfd613dd3724d5cb6cd352ed",
+      "adaptation": "Trailing whitespace normalized; code unchanged."
     }
   },
   "source_repository": "/Users/fenghengzhi/Developer/kirikiroid2-web",
