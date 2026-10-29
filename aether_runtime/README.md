@@ -59,8 +59,8 @@ ctest --test-dir out/aether --output-on-failure --no-tests=error
 
 The host path supplies only the public ABI headers in `abi/include`. Dependencies
 are CMake, a C++17 compiler, Python 3, Bison 3.8.2+, FreeType and nlohmann-json,
-plus the platform's OpenGL/SDL development dependencies. Existing host Oniguruma
-is reused when available; otherwise the upstream bundled dependency is built.
+Oniguruma, plus the platform's OpenGL/SDL development dependencies. Oniguruma
+is located through its CMake package (vcpkg) or pkg-config (Homebrew/Linux).
 With Homebrew, use `-DCMAKE_PREFIX_PATH="$(brew --prefix)"` and
 `-DTJS_BISON="$(brew --prefix bison)/bin/bison"`. Aether's vcpkg toolchain and
 installed packages can also be supplied normally.
