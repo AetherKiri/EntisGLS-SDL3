@@ -6,7 +6,9 @@
 #define _CRTDBG_MAP_ALLOC
 #endif
 
+#include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <cstdint>
 #include <cstddef>
 #include <memory>
