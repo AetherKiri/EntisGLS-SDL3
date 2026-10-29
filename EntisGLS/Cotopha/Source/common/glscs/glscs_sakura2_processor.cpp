@@ -35,6 +35,8 @@ ESL_DLL_DECL( DWORD	ECSSakura2Processor::countAssertLocked = 0 ) ;
 
 // システム関数のエントリ数
 static int	g_countSystemCallFunc = 0 ;
+// SakuraGL and the legacy Cotopha adapter share this processor.
+static atomic_int_t g_processorReferences = 0 ;
 
 
 //////////////////////////////////////////////////////////////////////////////
@@ -47,6 +49,7 @@ void ECSSakura2Processor::Initialize( void )
 {
 #if	!defined(ENTISGLS4_DLL_IMPORT)
 	SSystem::Initialize() ;
+	if ( SSystem::AtomicAdd( &g_processorReferences, 1 ) != 1 ) return ;
 	//
 	// 同期オブジェクト生成
 	//
@@ -105,6 +108,11 @@ void ECSSakura2Processor::Initialize( void )
 void ECSSakura2Processor::Close( void )
 {
 #if	!defined(ENTISGLS4_DLL_IMPORT)
+	if ( SSystem::AtomicSub( &g_processorReferences, 1 ) != 0 )
+	{
+		SSystem::Finalize() ;
+		return ;
+	}
 	//
 	// 同期オブジェクト消去
 	//

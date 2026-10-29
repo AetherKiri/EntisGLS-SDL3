@@ -32,6 +32,9 @@ struct GameLaunchConfig {
     std::string configSource;
     std::optional<std::uint32_t> psbKey;
     std::vector<FontSpec> openTypeFonts;
+    // Optional loose fonts discovered by the embedding host, after identity
+    // calculation. Explicit XML faces retain precedence; invalid extras warn.
+    std::vector<std::string> bundledFonts;
     // Dependency order: target aliases precede their users. Filters are absent
     // from normalizedXml and must be registered after openTypeFonts.
     std::vector<FontAlias> fontAliases;

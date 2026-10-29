@@ -64,6 +64,7 @@ add_library(gls4_sdl STATIC ${SDL_SDK_SOURCES}
     "${SDL_SDK_OVERLAY}/system/ssys_file.cpp"
     native/platform/sdl/synchronization.cpp native/platform/sdl/memory_info.cpp
     native/platform/sdl/system.cpp native/platform/sdl/game_file_opener.cpp native/platform/sdl/sdl_pcm_stream.cpp
+    native/platform/sdl/runtime_control.cpp
     native/platform/sdl/device_volume.cpp
     native/platform/sdl/mobile_orientation.cpp
     native/platform/sdl/sdl_sound_player.cpp native/platform/sdl/image_codec.cpp
@@ -95,5 +96,7 @@ target_link_libraries(legacy_objects PUBLIC motion_apk_runtime)
 set(LEGACY_HEAP_SDK "${CMAKE_CURRENT_BINARY_DIR}/legacy_heap_sdk/glscs_sakura2_obj_heap.cpp")
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${STUDYSTEADY_ROOT}/tools/sdk/motion_prepare_heap_sdk.py"
     --output "${LEGACY_HEAP_SDK}" COMMAND_ERROR_IS_FATAL ANY)
-include("${CMAKE_CURRENT_LIST_DIR}/launcher_app.cmake")
+if(NOT AETHER_ENTISGLS_EMBEDDED)
+    include("${CMAKE_CURRENT_LIST_DIR}/launcher_app.cmake")
+endif()
 include("${CMAKE_CURRENT_LIST_DIR}/runtime_tests.cmake")

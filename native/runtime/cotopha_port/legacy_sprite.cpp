@@ -29,6 +29,23 @@ bool LegacySpriteDynamicModeEnabled(const SakuraGL::SGLSprite* native) {
     const auto found=owners.find(const_cast<SakuraGL::SGLSprite*>(native));
     return found!=owners.end()&&found->second->IsLegacyDynamicModeEnabled();
 }
+bool GetLegacySpriteZScale(const SakuraGL::SGLSprite* native, double& focal, bool& fixed) {
+    GraphicsLock lock;
+    const auto found = owners.find(const_cast<SakuraGL::SGLSprite*>(native));
+    return found != owners.end() && ReadLegacySpriteZScale(*found->second, focal, fixed);
+}
+void VisitLegacySprites(void (*visitor)(const SakuraGL::SGLSprite&, void*), void* user) {
+    GraphicsLock lock;
+    if(visitor)for(const auto& entry:owners)visitor(*entry.first,user);
+}
+bool GetLegacySpriteCamera(const SakuraGL::SGLSprite* native, LegacySpriteCamera& camera) {
+    GraphicsLock lock;
+    for (; native; native = native->GetParent()) {
+        const auto found = owners.find(const_cast<SakuraGL::SGLSprite*>(native));
+        if (found != owners.end() && ReadLegacySpriteCamera(*found->second, camera)) return true;
+    }
+    return false;
+}
 bool ECSSprite::EnableLegacyDynamicMode(bool enabled) {
     GraphicsLock lock;
     // Notify both old and new bounds: direct children can extend beyond a
@@ -49,7 +66,13 @@ ECSSprite::~ECSSprite() {
     ResetLegacySpriteDrawState(*this);
     GraphicsLock lock;
     if (auto *parent = sprite_->GetParent()) parent->DetachChild(sprite_.get());
-    sprite_->DetachAllChildren();
+    // Script children have their own ECS owners. Skin items are smart children
+    // owned by the native parent; detaching those abandons their allocation.
+    for(size_t i=sprite_->GetChildCount();i>0;--i) {
+        auto* child=sprite_->GetChildAt(i-1);
+        if(owners.count(child))sprite_->DetachChild(child);
+    }
+    sprite_->RemoveAllChildren();
     owners.erase(sprite_.get());
     sprite_.reset();
     for(auto& ref:legacyReferences_) ref.SetReference(nullptr,nullptr);
@@ -80,7 +103,7 @@ ESLError ECSSprite::Release() {
     // GLS3 removes only skin items; retain the existing script child links.
     for(size_t i=sprite_->GetChildCount();i>0;--i) {
         auto* child=sprite_->GetChildAt(i-1);
-        if(owners.find(child)==owners.end())sprite_->DetachChild(child);
+        if(owners.find(child)==owners.end())sprite_->RemoveChild(child);
     }
     if(formed){formed->AttachFormParser(nullptr);formed->SetBasicForm(nullptr);}
     formSkin_.reset();
@@ -147,9 +170,20 @@ void ECSSprite::RecordLegacyItemInteger(const wchar_t* id,const wchar_t* member,
 ESLError ECSSprite::BuildFormPage(std::shared_ptr<SakuraGL::SGLSkinManager> skin, const wchar_t* page) {
     GraphicsLock lock;
     auto* formed = ESLTypeCast<SakuraGL::SGLSpriteFormed>(sprite_.get());
-    if (!skin || !formed || !skin->GetFormAs(page)) return eslErrGeneral;
+    if (!skin || !formed) return eslErrGeneral;
+    auto* form=skin->GetFormAs(page);
+    if (!form) return eslErrGeneral;
     Release();
     if (skin->BuildFormedPage(*formed, page)) { Release(); return eslErrGeneral; }
+    // GLS3 CreateFormedPage resets layout even when reusing an animated page.
+    // The modern skin builder retains zoom/pivot (and window position), which
+    // otherwise collapses later chapter text canvases after a closing effect.
+    auto parameter=formed->GetParameter();
+    parameter.vDst.x=form->GetAttrRichIntegerAs(L"x",0);
+    parameter.vDst.y=form->GetAttrRichIntegerAs(L"y",0);
+    parameter.vCenter=SakuraGL::S2DDVector(0,0);
+    parameter.vZoom=SakuraGL::S2DDVector(1,1);
+    formed->SetParameter(parameter);
     formSkin_ = std::move(skin);
     legacyPage_=page?page:L"";
     return eslErrSuccess;

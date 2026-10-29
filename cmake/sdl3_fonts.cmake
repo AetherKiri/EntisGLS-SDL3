@@ -1,5 +1,12 @@
 # OTF/CFF font rendering is shared by every SDL target; no system font install.
 include_guard(GLOBAL)
+if(AETHER_ENTISGLS_EMBEDDED)
+    find_package(Freetype REQUIRED)
+    if(NOT TARGET freetype)
+        add_library(freetype ALIAS Freetype::Freetype)
+    endif()
+    return()
+endif()
 set(STUDY_FREETYPE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/vendor/freetype")
 if(NOT EXISTS "${STUDY_FREETYPE_ROOT}/CMakeLists.txt")
     message(FATAL_ERROR "Font dependencies are missing. Run python3 tools/sdk/setup_sdl_fonts.py")

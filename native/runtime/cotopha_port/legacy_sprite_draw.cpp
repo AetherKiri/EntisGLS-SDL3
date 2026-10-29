@@ -1,5 +1,6 @@
 #include "compatibility/sdk/legacy/gls.h"
 #include "runtime/cotopha_port/legacy_sprite_draw.h"
+#include "runtime/cotopha_port/legacy_sprite_projection.h"
 #include "runtime/cotopha_port/legacy_sprite.h"
 #include "runtime/cotopha_port/legacy_save_io.h"
 #include "runtime/cotopha_port/legacy_tone_filter.h"
@@ -164,11 +165,27 @@ public:
     }
 };
 IMPLEMENT_CLASS_INFO(LegacyAnimator, SGLSpriteAnimator)
+void InvalidateCameraBuffers(SGLSprite& sprite) {
+    // The GLS3 camera affects descendant projection, including children
+    // behind cached canvases. GLS4 action updates invalidate only the parent
+    // of the animated sprite, leaving its own rendered children unchanged.
+    // Leaf buffers may hold pixels drawn directly by script. Their image
+    // content is unchanged; only their projection into the parent changes.
+    if(!sprite.GetChildCount())return;
+    for(size_t i=0;i<sprite.GetChildCount();++i)
+        if(auto* child=sprite.GetChildAt(i))InvalidateCameraBuffers(*child);
+    sprite.PostUpdate();
+}
 class LegacyAction final : public SGLSpriteAction {
 public:
     std::vector<uint32_t> durations;
     SSystem::SSmartReference<LegacyAlphaFilter> alphaFilter;
     std::shared_ptr<LegacySpriteBlendEffect> blendEffect;
+    std::shared_ptr<LegacySpriteCamera> camera;
+    SSystem::SSmartReference<SGLSprite> cameraOwner;
+    bool cameraMoving=false;
+    SGLBezierCurves<S3DDVector> cameraPosition,cameraTarget;
+    SGLBezierCurves<double> cameraRoll;
     void CopyCurveState(const LegacyAction& from) {
         // Do not assign SGLObject's tracked identity while this action is live.
         m_typeAction=from.m_typeAction;m_flagPaused=from.m_flagPaused;
@@ -178,6 +195,9 @@ public:
         m_bzAngle=from.m_bzAngle;m_bzTransparency=from.m_bzTransparency;
         m_bzFilterParam=from.m_bzFilterParam;m_bzFilterParam2=from.m_bzFilterParam2;
         durations=from.durations;alphaFilter=from.alphaFilter;blendEffect=from.blendEffect;
+        camera=from.camera;cameraMoving=from.cameraMoving;
+        cameraOwner=from.cameraOwner.GetReference();
+        cameraPosition=from.cameraPosition;cameraTarget=from.cameraTarget;cameraRoll=from.cameraRoll;
     }
     bool OnAction(SGLSprite::Parameter &param,uint32_t milliseconds) override {
         if(!(animationFlags.load(std::memory_order_relaxed)&2)) { OnFinish(param);return true; }
@@ -193,6 +213,13 @@ public:
         }
         const auto transparency=param.nTransparency;
         SGLSpriteAction::EffectParameter(param,t);
+        if(camera&&cameraMoving) {
+            if(cameraPosition.GetLength()>=4)camera->position=cameraPosition.PointAt(t);
+            if(cameraTarget.GetLength()>=4)camera->target=cameraTarget.PointAt(t);
+            if(cameraRoll.GetLength()>=4)camera->roll=cameraRoll.PointAt(t);
+            camera->enabled=true;
+            if(auto* owner=cameraOwner.GetReference())InvalidateCameraBuffers(*owner);
+        }
         if(blendEffect&&(m_maskSetElement&SGLSprite::flagParamTransparency)) {
             blendEffect->SetDegree(param.nTransparency);param.nTransparency=transparency;
         } else if(auto* filter=alphaFilter.GetReference())if(filter->UsesMaskDegree()&&(m_maskSetElement&SGLSprite::flagParamTransparency)) {
@@ -212,7 +239,6 @@ ESLError ToNativeFlags(uint32_t legacy,uint32_t &flags) {
     // to the new Z-order bit at 0x2 and must never pass through unchanged.
     if(legacy&0x80) return ESLErrorMsg("Legacy shaped polygon drawing has not been ported");
     if(legacy&2) return ESLErrorMsg("Legacy grayscale glow drawing has not been ported");
-    if(legacy&0x8000) return ESLErrorMsg("Legacy Sprite Z-scale projection has not been ported");
     if(legacy&0x3f08) return ESLErrorMsg("Unsupported legacy Sprite drawing flags");
     flags=legacy & 0xffff00b0u; // fixed-point positions are converted to doubles
     if(legacy&4) flags|=paintWithZOrder;
@@ -241,6 +267,7 @@ struct LegacySpriteDrawState {
     uint32_t legacyFlags=0,dimColor=0,lightColor=0xffffff;
     bool flagsSet=false;
     double zScale=0;
+    std::shared_ptr<LegacySpriteCamera> camera=std::make_shared<LegacySpriteCamera>();
     struct Visual {
         uint32_t functions=4,enabled=7,fillColor=0,alphaRange=256,blendDegree=0;
         bool fill=false,dynamic=false,visible=true;
@@ -252,10 +279,22 @@ struct LegacySpriteDrawState {
     std::array<int32_t,5> restoredAnimation{};
     bool restoreVisual=false,restoreAnimation=false;
 };
+bool ReadLegacySpriteZScale(ECSSprite& sprite, double& focal, bool& fixed) {
+    const auto& state = sprite.LegacyDrawState();
+    if (!state || !(state->legacyFlags & 0x8000)) return false;
+    focal = state->zScale; fixed = (state->legacyFlags & 0x40) != 0;
+    return true;
+}
+bool ReadLegacySpriteCamera(ECSSprite& sprite, LegacySpriteCamera& camera) {
+    const auto& state = sprite.LegacyDrawState();
+    if (!state || !state->camera->enabled) return false;
+    camera = *state->camera;
+    return true;
+}
 namespace {
 LegacySpriteDrawState &State(ECSSprite &sprite) {
     auto &ptr=sprite.LegacyDrawState();
-    if(!ptr) ptr=std::make_shared<LegacySpriteDrawState>();
+    if(!ptr) {ptr=std::make_shared<LegacySpriteDrawState>();ptr->pendingAction.camera=ptr->camera;}
     return *ptr;
 }
 template<class T> void KeepRemainingCurve(SGLBezierCurves<T>& curve,double t) {
@@ -273,6 +312,7 @@ LegacyAction PrepareCurveEdit(LegacySpriteDrawState& state) {
         const double t=double(std::min(edit.m_msecPast,edit.m_msecDuration))/edit.m_msecDuration;
         KeepRemainingCurve(edit.m_bzTransparency,t);KeepRemainingCurve(edit.m_bzPos,t);
         KeepRemainingCurve(edit.m_bzAngle,t);KeepRemainingCurve(edit.m_bzZoom,t);
+        KeepRemainingCurve(edit.cameraPosition,t);KeepRemainingCurve(edit.cameraTarget,t);KeepRemainingCurve(edit.cameraRoll,t);
         edit.m_msecPast=0;
     }
     return edit;
@@ -282,7 +322,8 @@ void CommitCurveEdit(LegacySpriteDrawState& state,const LegacyAction& edit) {
     if(auto* active=static_cast<LegacyAction*>(state.activeAction.GetReference()))active->CopyCurveState(edit);
     state.hasAction=true;
 }
-ESLError ReadParameter(SGLSprite::Parameter &param,LegacySpriteDrawState &state,ECSStructure &source) {
+ESLError ReadParameter(SGLSprite::Parameter &param,LegacySpriteDrawState &state,ECSStructure &source,
+                       S2DDVector imageCenter=S2DDVector(0,0)) {
     const uint32_t oldFlags=source.GetMemberAsInt(L"nFlags",state.flagsSet?state.legacyFlags:ToLegacyFlags(param.nFlags));
     uint32_t flags;
     const auto error=ToNativeFlags(oldFlags,flags);
@@ -292,9 +333,11 @@ ESLError ReadParameter(SGLSprite::Parameter &param,LegacySpriteDrawState &state,
         param.vDst.x=point->GetMemberAsInt(L"x",std::llround(param.vDst.x*fixed))/fixed;
         param.vDst.y=point->GetMemberAsInt(L"y",std::llround(param.vDst.y*fixed))/fixed;
     }
+    // GLS3 exposes an absolute pivot in image coordinates; the modern SDK
+    // stores an offset from the image hotspot. Translate only at the ABI edge.
     if(auto *point=MemberStruct(source,L"ptRevCenter")) {
-        param.vCenter.x=point->GetMemberAsInt(L"x",param.vCenter.x);
-        param.vCenter.y=point->GetMemberAsInt(L"y",param.vCenter.y);
+        param.vCenter.x=point->GetMemberAsInt(L"x",std::llround((param.vCenter.x+imageCenter.x)*fixed))/fixed-imageCenter.x;
+        param.vCenter.y=point->GetMemberAsInt(L"y",std::llround((param.vCenter.y+imageCenter.y)*fixed))/fixed-imageCenter.y;
     }
     param.nFlags=flags;
     param.vZoom.x=source.GetMemberAsReal(L"rHorzUnit",param.vZoom.x);
@@ -310,9 +353,13 @@ ESLError ReadParameter(SGLSprite::Parameter &param,LegacySpriteDrawState &state,
     state.dimColor=source.GetMemberAsInt(L"rgbDimColor",state.dimColor);
     state.lightColor=source.GetMemberAsInt(L"rgbLightColor",state.lightColor);
     state.zScale=source.GetMemberAsReal(L"rZScale",state.zScale);
+    if (!std::isfinite(state.zScale)) return eslErrInvalidParam;
+    param.nSpriteFlags = (param.nSpriteFlags & ~SGLSprite::flagZScale) |
+        ((oldFlags & 0x8000) ? SGLSprite::flagZScale : 0);
     return eslErrSuccess;
 }
-void WriteParameter(ECSStructure &target,const SGLSprite::Parameter &param,const LegacySpriteDrawState &state) {
+void WriteParameter(ECSStructure &target,const SGLSprite::Parameter &param,const LegacySpriteDrawState &state,
+                    S2DDVector imageCenter=S2DDVector(0,0)) {
     const uint32_t flags=state.flagsSet?state.legacyFlags:ToLegacyFlags(param.nFlags);
     const double fixed=(flags&0x40)?65536.0:1.0;
     target.SetMemberAsInt(L"nFlags",flags);
@@ -320,7 +367,8 @@ void WriteParameter(ECSStructure &target,const SGLSprite::Parameter &param,const
         point->SetMemberAsInt(L"x",std::llround(param.vDst.x*fixed));point->SetMemberAsInt(L"y",std::llround(param.vDst.y*fixed));
     }
     if(auto *point=MemberStruct(target,L"ptRevCenter")) {
-        point->SetMemberAsInt(L"x",std::llround(param.vCenter.x));point->SetMemberAsInt(L"y",std::llround(param.vCenter.y));
+        point->SetMemberAsInt(L"x",std::llround((param.vCenter.x+imageCenter.x)*fixed));
+        point->SetMemberAsInt(L"y",std::llround((param.vCenter.y+imageCenter.y)*fixed));
     }
     target.SetMemberAsReal(L"rHorzUnit",param.vZoom.x);target.SetMemberAsReal(L"rVertUnit",param.vZoom.y);
     target.SetMemberAsReal(L"rRevAngle",param.zAngle);target.SetMemberAsReal(L"rCrossingAngle",param.xyCross);
@@ -345,6 +393,10 @@ ESLError ReadNumberCurve(SSystem::SArray<double> &values,ECSArray &array,double 
 }
 void ResetLegacySpriteDrawState(ECSSprite &sprite,bool preserveTone) {
     GraphicsGuard lock;
+    // Owned image views disappear with this state. Invalidate their current
+    // bounds while the image still exists; AttachImage(nullptr) is too late
+    // after its tracked reference has already been cleared by destruction.
+    sprite.NativeSprite().NotifyUpdate();
     sprite.NativeSprite().SetSpriteImager(nullptr);
     sprite.NativeSprite().CancelAction();
     if(auto state=sprite.LegacyDrawState())if(auto* filter=state->alphaFilter.GetReference())sprite.NativeSprite().RemoveFilter(filter);
@@ -377,7 +429,8 @@ bool LegacyEffectAnimationEnabled() {return (animationFlags.load(std::memory_ord
 ESLError HandleLegacySpriteDraw(ECSContext &context,ECSSprite &object,const wchar_t *method,
                                ECSObjArray<ECSObject> &args,bool &handled) {
     auto named=[method](const wchar_t *value){return method&&!std::wcscmp(method,value);};
-    handled=named(L"AttachToneFilter")||named(L"FillRect")||named(L"DrawImage")||named(L"AttachImage")||named(L"SetAlphaImage")||named(L"GetParameter")||named(L"SetParameter")||
+    handled=named(L"Set3DViewCamera")||named(L"Get3DViewCamera")||named(L"Enable3DViewCamera")||named(L"SetCameraCurve")||
+        named(L"AttachToneFilter")||named(L"FillRect")||named(L"DrawImage")||named(L"AttachImage")||named(L"SetAlphaImage")||named(L"GetParameter")||named(L"SetParameter")||
         named(L"CopyParameters")||named(L"GetBlendDegree")||named(L"SetBlendDegree")||named(L"SetBlendingEnvelope")||named(L"SetBezierCurve")||
         named(L"BeginActivation")||named(L"FlushActivation")||named(L"CancelActivation")||named(L"IsActivation")||
         named(L"ModifyAnimationFlags")||named(L"BeginAnimation")||named(L"EndAnimation")||named(L"IsDuringAnimation")||
@@ -416,6 +469,40 @@ ESLError HandleLegacySpriteDraw(ECSContext &context,ECSSprite &object,const wcha
         out->SetMemberAsInt(L"left",bounds.left);out->SetMemberAsInt(L"top",bounds.top);
         out->SetMemberAsInt(L"right",bounds.right);out->SetMemberAsInt(L"bottom",bounds.bottom);
         return context.PushObject(*out);
+    }
+    if(named(L"Enable3DViewCamera")) {
+        if((error=count(2,2))) return error;
+        int enabled; if((error=integer(enabled,1))) return error;
+        State(object).camera->enabled=enabled!=0; InvalidateCameraBuffers(sprite); return push();
+    }
+    if(named(L"Set3DViewCamera")||named(L"Get3DViewCamera")) {
+        if((error=count(3,4))) return error;
+        const bool set=named(L"Set3DViewCamera");
+        LegacySpriteCamera camera; const bool found=GetLegacySpriteCamera(&sprite,camera);
+        if(!set&&!found) return push(0);
+        auto* position=ESLTypeCast<ECSStructureInterface>(context.GetArgumentObjectAs(args,1,L"Vector"));
+        auto* target=ESLTypeCast<ECSStructureInterface>(context.GetArgumentObjectAs(args,2,L"Vector"));
+        if(!position||!target) return ESLErrorMsg("Camera position and target require Vector objects");
+        if(set) {
+            auto read=[](ECSStructureInterface& value,S3DDVector& v) {
+                v.x=value.GetMemberAsReal(L"x",v.x);v.y=value.GetMemberAsReal(L"y",v.y);v.z=value.GetMemberAsReal(L"z",v.z);
+                return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z);
+            };
+            if(!read(*position,camera.position)||!read(*target,camera.target)) return eslErrInvalidParam;
+            if((error=context.GetArgumentAsReal(camera.roll,args,3,camera.roll))) return error;
+            if(!std::isfinite(camera.roll)) return eslErrInvalidParam;
+            camera.enabled=true; *State(object).camera=camera; InvalidateCameraBuffers(sprite); return push();
+        }
+        auto write=[](ECSStructureInterface& value,const S3DDVector& v) {
+            value.SetMemberAsReal(L"x",v.x);value.SetMemberAsReal(L"y",v.y);value.SetMemberAsReal(L"z",v.z);
+        };
+        write(*position,camera.position); write(*target,camera.target);
+        if(args.GetSize()>3) {
+            auto* roll=ESLTypeCast<ECSReal>(ECSObject::GetEntity(args.GetAt(3)));
+            if(!roll) return ESLErrorMsg("Camera roll output requires a Real object");
+            roll->m_varReal=camera.roll;
+        }
+        return push(-1);
     }
     if(named(L"GetScreenPosition")||named(L"SetScreenPosition")) {
         const bool set=named(L"SetScreenPosition");
@@ -597,6 +684,8 @@ ESLError HandleLegacySpriteDraw(ECSContext &context,ECSSprite &object,const wcha
         if(clip) imageClip=ReadRect(*clip);
         std::unique_ptr<SGLImageObject> reference(resource->GetImage()->NewReference(clip?&imageClip:nullptr,frame));
         if(!reference) return push(eslErrGeneral);
+        const auto oldParameters=sprite.GetParameter();
+        const auto oldImageCenter=sprite.GetImageCenter();
         object.Release();
         auto &state=State(object);
         state.attachedImage=std::move(reference);
@@ -606,6 +695,15 @@ ESLError HandleLegacySpriteDraw(ECSContext &context,ECSSprite &object,const wcha
             state.animator=animator;
             sprite.SetSpriteImager(animator);
         } else sprite.AttachImage(state.attachedImage.get());
+        // GLS3 CreateAnimation / whole-frame AttachImage replaces ptRevCenter
+        // with the new image hotspot. Modern sprites add that hotspot to an
+        // independent pivot offset, so retaining the old offset shifts every
+        // subsequent hover image. Clipped static views retain the old pivot.
+        auto parameters=sprite.GetParameter();
+        parameters.vCenter=frame<0||!clip?S2DDVector(0,0):S2DDVector(
+            oldParameters.vCenter.x+oldImageCenter.x-sprite.GetImageCenter().x,
+            oldParameters.vCenter.y+oldImageCenter.y-sprite.GetImageCenter().y);
+        sprite.SetParameter(parameters);
         const auto legacyView=clip?ReadRect(*clip):SGLRect();
         object.RecordLegacyImageSource(resource,frame,clip?&legacyView:nullptr,context);
         return push();
@@ -661,16 +759,19 @@ ESLError HandleLegacySpriteDraw(ECSContext &context,ECSSprite &object,const wcha
         if((error=count(2,2))) return error;
         auto *parameters=ESLTypeCast<ECSStructure>(context.GetArgumentObjectAs(args,1,L"SpriteParam"));
         if(!parameters) return ESLErrorMsg("Sprite parameter requires SpriteParam");
-        if(named(L"GetParameter")) { WriteParameter(*parameters,sprite.GetParameter(),state);return context.PushObject(new ECSReference(parameters)); }
+        if(named(L"GetParameter")) { WriteParameter(*parameters,sprite.GetParameter(),state,sprite.GetImageCenter());return context.PushObject(new ECSReference(parameters)); }
         auto param=sprite.GetParameter();
-        if((error=ReadParameter(param,state,*parameters))) return error;
+        if((error=ReadParameter(param,state,*parameters,sprite.GetImageCenter()))) return error;
         sprite.SetParameter(param);return push();
     }
     if(named(L"CopyParameters")) {
         if((error=count(2,2))) return error;
         auto *source=ESLTypeCast<ECSSprite>(context.GetArgumentObjectAs(args,1,L"Sprite"));
         if(!source) return ESLErrorMsg("CopyParameters requires Sprite");
-        sprite.SetParameter(source->NativeSprite().GetParameter());
+        auto parameters=source->NativeSprite().GetParameter();
+        parameters.vCenter.x+=source->NativeSprite().GetImageCenter().x-sprite.GetImageCenter().x;
+        parameters.vCenter.y+=source->NativeSprite().GetImageCenter().y-sprite.GetImageCenter().y;
+        sprite.SetParameter(parameters);
         const auto &sourceState=State(*source);
         state.legacyFlags=sourceState.legacyFlags;state.flagsSet=sourceState.flagsSet;
         state.dimColor=sourceState.dimColor;state.lightColor=sourceState.lightColor;state.zScale=sourceState.zScale;
@@ -730,6 +831,35 @@ ESLError HandleLegacySpriteDraw(ECSContext &context,ECSSprite &object,const wcha
         }
         CommitCurveEdit(state,edit);return push();
     }
+    if(named(L"SetCameraCurve")) {
+        if((error=count(3,4)))return error;
+        auto edit=PrepareCurveEdit(state); edit.camera=state.camera;
+        LegacySpriteCamera initial; GetLegacySpriteCamera(&sprite,initial);
+        auto vectors=[&](int index,SGLBezierCurves<S3DDVector>& curve,const S3DDVector& fallback)->ESLError {
+            auto* points=ESLTypeCast<ECSArray>(context.GetArgumentObjectAs(args,index,L"Array"));
+            const size_t n=points?points->m_varArray.GetSize():0;
+            if(!CurveLength(n))return eslErrInvalidParam;
+            curve.SetLength(n>1?n:4);
+            for(size_t i=0;i<curve.GetLength();++i) {
+                auto value=fallback;
+                if(n) {
+                    auto* point=ESLTypeCast<ECSStructureInterface>(ECSObject::GetEntity(points->m_varArray.GetAt(n==1?0:i)));
+                    if(!point)return ESLErrorMsg("Camera curve needs Vector control points");
+                    value.x=point->GetMemberAsReal(L"x",value.x);value.y=point->GetMemberAsReal(L"y",value.y);value.z=point->GetMemberAsReal(L"z",value.z);
+                }
+                if(!std::isfinite(value.x)||!std::isfinite(value.y)||!std::isfinite(value.z))return eslErrInvalidParam;
+                curve.SetAt(i,value);
+            }
+            return eslErrSuccess;
+        };
+        if((error=vectors(1,edit.cameraPosition,initial.position))||(error=vectors(2,edit.cameraTarget,initial.target)))return error;
+        auto* rolls=ESLTypeCast<ECSArray>(context.GetArgumentObjectAs(args,3,L"Array"));
+        SSystem::SArray<double> values;
+        if(rolls&&(error=ReadNumberCurve(values,*rolls)))return error;
+        edit.cameraRoll.SetLength(values.GetLength()?values.GetLength():4);
+        for(size_t i=0;i<edit.cameraRoll.GetLength();++i)edit.cameraRoll.SetAt(i,values.GetLength()?values.At(i):initial.roll);
+        edit.cameraMoving=true;CommitCurveEdit(state,edit);return push();
+    }
     if(named(L"SetBezierCurve")) {
         if((error=count(2,4))) return error;
         auto edit=PrepareCurveEdit(state);
@@ -771,6 +901,8 @@ ESLError HandleLegacySpriteDraw(ECSContext &context,ECSSprite &object,const wcha
         int type;if((error=integer(type,2))) return error;
         if(type<0||type>2) return eslErrInvalidParam;
         auto action=std::make_unique<LegacyAction>(state.pendingAction);
+        action->camera=state.camera;
+        action->cameraOwner=&sprite;
         action->alphaFilter=state.alphaFilter.GetReference();action->blendEffect=state.blendEffect;
         action->durations.clear();
         auto *durations=ESLTypeCast<ECSArray>(context.GetArgumentObjectAs(args,1,L"Array"));
@@ -794,7 +926,7 @@ ESLError HandleLegacySpriteDraw(ECSContext &context,ECSSprite &object,const wcha
         if((error=count(1,1))) return error;
         if(named(L"IsActivation")) return push(sprite.IsAction()?-1:0);
         if(named(L"FlushActivation")) sprite.FlushAction();else sprite.CancelAction();
-        state.pendingAction=LegacyAction();state.hasAction=false;return push();
+        state.pendingAction=LegacyAction();state.pendingAction.camera=state.camera;state.hasAction=false;return push();
     }
     return ESLErrorMsg("Unhandled Sprite drawing method");
 }
@@ -816,7 +948,9 @@ ESLError SaveLegacySpriteVisual(ESLFileObject& file,ECSSprite& object) {
     const double x=std::round(param.vDst.x*fixed),y=std::round(param.vDst.y*fixed);
     if(x<INT32_MIN||x>INT32_MAX||y<INT32_MIN||y>INT32_MAX)return eslErrInvalidParam;
     out.U32(flags);out.I32(int32_t(x));out.I32(int32_t(y));
-    out.I32(int32_t(param.vCenter.x));out.I32(int32_t(param.vCenter.y));
+    const double cx=std::round(param.vCenter.x*fixed),cy=std::round(param.vCenter.y*fixed);
+    if(!std::isfinite(cx)||!std::isfinite(cy)||cx<INT32_MIN||cx>INT32_MAX||cy<INT32_MIN||cy>INT32_MAX)return eslErrInvalidParam;
+    out.I32(int32_t(cx));out.I32(int32_t(cy));
     out.F32(param.vZoom.x);out.F32(param.vZoom.y);out.F32(param.zAngle);out.F32(param.xyCross);
     out.U32(state.dimColor);out.U32(state.lightColor);out.U32(param.nTransparency);
     out.F32(param.vDst.z);out.U32(param.rgbColorParam.ui32);out.F32(state.zScale);
@@ -829,8 +963,9 @@ ESLError SaveLegacySpriteVisual(ESLFileObject& file,ECSSprite& object) {
     out.F32(screen.x);out.F32(screen.y);out.F32(screen.z);
     out.U32(0);out.U32(0); // No legacy per-buffer 3D draw/render flags are enabled by the bridge.
     out.String(sprite.GetID());
-    out.U32(0); // Virtual camera is unsupported and cannot have been enabled successfully.
-    out.F32(0);out.F32(0);out.F32(0);out.F32(0);out.F32(0);out.F32(1024);out.F32(0);
+    out.U32(state.camera->enabled?1:0);
+    out.F32(state.camera->position.x);out.F32(state.camera->position.y);out.F32(state.camera->position.z);
+    out.F32(state.camera->target.x);out.F32(state.camera->target.y);out.F32(state.camera->target.z);out.F32(state.camera->roll);
     out.U32(0);
     return out.error;
 }
@@ -844,15 +979,17 @@ ESLError LoadLegacySpriteVisual(ESLFileObject& file,ECSSprite& object) {
     if(const auto error=ToNativeFlags(state.legacyFlags,param.nFlags))return error;
     const double fixed=(state.legacyFlags&0x40)?65536.0:1.0;
     param.vDst.x=in.I32()/fixed;param.vDst.y=in.I32()/fixed;
-    param.vCenter.x=in.I32();param.vCenter.y=in.I32();
+    param.vCenter.x=in.I32()/fixed;param.vCenter.y=in.I32()/fixed;
     param.vZoom.x=in.F32();param.vZoom.y=in.F32();param.zAngle=in.F32();param.xyCross=in.F32();
     state.dimColor=in.U32();state.lightColor=in.U32();param.nTransparency=in.U32();
     param.vDst.z=in.F32();param.rgbColorParam=SGLPalette(in.U32());state.zScale=in.F32();
     visual.alphaRange=in.U32();visual.blendDegree=in.U32();
     visual.screen.x=in.F32();visual.screen.y=in.F32();visual.screen.z=in.F32();
-    const auto draw=in.U32(),render=in.U32();visual.id=in.String();const auto camera=in.U32();
-    for(int i=0;i<7;++i)in.F32();in.Reserved();
-    if(draw||render||camera)return ESLErrorMsg("Saved Sprite needs legacy 3D buffer/camera rendering that is not implemented");
+    const auto draw=in.U32(),render=in.U32();visual.id=in.String();state.camera->enabled=in.U32()!=0;
+    state.camera->position.x=in.F32();state.camera->position.y=in.F32();state.camera->position.z=in.F32();
+    state.camera->target.x=in.F32();state.camera->target.y=in.F32();state.camera->target.z=in.F32();state.camera->roll=in.F32();in.Reserved();
+    param.nSpriteFlags=(state.legacyFlags&0x8000)?SGLSprite::flagZScale:0;
+    if(draw||render)return ESLErrorMsg("Saved Sprite needs legacy 3D polygon rendering that is not implemented");
     if((visual.functions&~63u)||(visual.enabled&~7u)||param.nTransparency>256)return eslErrInvalidParam;
     state.blendDegree=visual.blendDegree;state.restoreVisual=!in.error;
     return in.error;
@@ -874,7 +1011,12 @@ ESLError SaveLegacySpriteAnimation(ESLFileObject& file,ECSSprite& object) {
     for(size_t i=0;i<action.m_bzPos.GetLength();++i){const auto& p=action.m_bzPos.At(i);out.F32(p.x);out.F32(p.y);out.F32(p.z);}
     out.U32(action.m_bzAngle.GetLength());for(size_t i=0;i<action.m_bzAngle.GetLength();++i)out.F64(action.m_bzAngle.At(i));
     out.U32(action.m_bzZoom.GetLength());for(size_t i=0;i<action.m_bzZoom.GetLength();++i){const auto& p=action.m_bzZoom.At(i);out.F32(p.x);out.F32(p.y);}
-    out.I32(0);out.U32(0);out.U32(0);out.U32(0); // No camera movement/position/target/roll curves.
+    out.I32(action.cameraMoving);
+    for(const auto* curve:{&action.cameraPosition,&action.cameraTarget}) {
+        out.U32(curve->GetLength());
+        for(size_t i=0;i<curve->GetLength();++i){const auto& p=curve->At(i);out.F32(p.x);out.F32(p.y);out.F32(p.z);}
+    }
+    out.U32(action.cameraRoll.GetLength());for(size_t i=0;i<action.cameraRoll.GetLength();++i)out.F64(action.cameraRoll.At(i));
     out.U32(action.m_typeAction);out.U32(active?action.m_msecDuration:0);
     out.U32(action.durations.size());for(auto value:action.durations)out.U32(value);out.U32(0);
     return out.error;
@@ -905,12 +1047,20 @@ ESLError LoadLegacySpriteAnimation(ESLFileObject& file,ECSSprite& object) {
     for(size_t i=0;i<count;++i){S2DDVector p;p.x=in.F32();p.y=in.F32();zooms.SetAt(i,p);}
     if(count==1){const auto value=zooms.At(0);zooms.SetLength(4);for(int i=0;i<4;++i)zooms.SetAt(i,value);}
     if(count&&moving)action.SetZoomCurve(zooms);
-    if(in.I32()||in.Count()||in.Count()||in.Count())return ESLErrorMsg("Saved Sprite camera animation has not been ported");
+    action.cameraMoving=in.I32()!=0;action.camera=state.camera;
+    for(auto* curve:{&action.cameraPosition,&action.cameraTarget}) {
+        count=in.Count();if(!CurveLength(count))return eslErrInvalidParam;curve->SetLength(count);
+        for(size_t i=0;i<count;++i){S3DDVector p;p.x=in.F32();p.y=in.F32();p.z=in.F32();curve->SetAt(i,p);}
+        if(count==1){const auto p=curve->At(0);curve->SetLength(4);for(int i=0;i<4;++i)curve->SetAt(i,p);}
+    }
+    count=in.Count();if(!CurveLength(count))return eslErrInvalidParam;action.cameraRoll.SetLength(count);
+    for(size_t i=0;i<count;++i)action.cameraRoll.SetAt(i,in.F64());
+    if(count==1){const auto value=action.cameraRoll.At(0);action.cameraRoll.SetLength(4);for(int i=0;i<4;++i)action.cameraRoll.SetAt(i,value);}
     action.m_typeAction=in.U32();action.m_msecDuration=in.U32();count=in.Count();action.durations.resize(count);
     uint64_t sum=0;for(auto& value:action.durations){value=in.U32();sum+=value;}in.Reserved();
     if(action.m_typeAction>2||action.m_msecDuration>UINT32_MAX/2||sum>UINT32_MAX/2||
        (count&&action.m_msecDuration&&sum!=action.m_msecDuration))return eslErrInvalidParam;
-    state.hasAction=fade||moving;state.restoreAnimation=!in.error;return in.error;
+    state.hasAction=fade||moving||action.cameraMoving;state.restoreAnimation=!in.error;return in.error;
 }
 
 void RestoreLegacySpriteVisual(ECSSprite& object) {
@@ -966,6 +1116,7 @@ ESLError CommitLegacySpriteDrawing(ECSContext& context,ECSSprite& object,ECSReso
     if(auto* filter=state.alphaFilter.GetReference())filter->SetDegree(state.restored.blendDegree);
     if(state.restoreAnimation&&state.hasAction&&state.pendingAction.m_msecDuration) {
         auto* action=new LegacyAction(state.pendingAction);action->alphaFilter=state.alphaFilter.GetReference();action->blendEffect=state.blendEffect;
+        action->cameraOwner=&sprite;
         state.activeAction=action;sprite.AddAction(action);
     }
     state.restoreAnimation=state.restoreVisual=false;
@@ -1012,6 +1163,97 @@ bool CheckLegacySpriteDraw() {
             textFound,bounds.left,bounds.top,bounds.right,bounds.bottom,centre.x,centre.y);
         page.NativeSprite().DetachChild(&placeholder);
         if(!check(empty&&withText,"empty and populated skin text retain declared canvas rectangle in parent coordinates"))return false;
+    }
+    {
+        class FixtureSkin final : public SGLSkinManager {
+        public:
+            FixtureSkin() {
+                auto* form=new SSystem::SXMLDocument;form->SetTag(L"page");
+                form->SetAttrIntegerAs(L"width",800);form->SetAttrIntegerAs(L"height",200);
+                form->SetAttrIntegerAs(L"x",13);form->SetAttrIntegerAs(L"y",31);
+                auto* text=new SSystem::SXMLDocument;text->SetTag(L"static_text");
+                text->SetAttributeAs(L"id",L"TEXT");
+                text->SetAttrIntegerAs(L"width",600);text->SetAttrIntegerAs(L"height",38);
+                text->SetAttrIntegerAs(L"x",26);text->SetAttrIntegerAs(L"y",28);
+                form->AddElement(text);m_ssoaForm.SetAs(L"FORM",form);
+            }
+        };
+        auto skin=std::make_shared<FixtureSkin>();ECSSprite page;
+        if(!check(!page.BuildFormPage(skin,L"FORM"),"build synthetic legacy form"))return false;
+        // Closing animations can leave a zero scale and a nonzero pivot. A
+        // later chapter rebuilds the same page before measuring its text area.
+        auto closed=page.NativeSprite().GetParameter();
+        closed.vCenter=S2DDVector(400,199);closed.vZoom=S2DDVector(0,0);
+        closed.vDst=S3DDVector(700,900,17);closed.nTransparency=123;
+        page.NativeSprite().SetParameter(closed);
+        SGLRect collapsed;LegacyItemRectangle(page.NativeSprite(),L"TEXT",collapsed);
+        if(!check(collapsed.GetWidth()<=2,"fixture reproduces collapsed animated form"))return false;
+        if(!check(!page.BuildFormPage(skin,L"FORM"),"rebuild form after closing animation"))return false;
+        SGLRect bounds;const bool found=LegacyItemRectangle(page.NativeSprite(),L"TEXT",bounds);
+        const auto& rebuilt=page.NativeSprite().GetParameter();
+        if(!check(found&&bounds.left==39&&bounds.top==59&&bounds.GetWidth()==600&&bounds.GetHeight()==38,
+                  "rebuilt form restores usable text layout in declared coordinates"))return false;
+        if(!check(rebuilt.vDst.z==17&&rebuilt.nTransparency==123,
+                  "form rebuild preserves unrelated depth and transparency"))return false;
+    }
+    {
+        SGLImage firstImage,secondImage;
+        SGLImageInfo info;info.width=90;info.height=68;info.depth=32;info.format=formatImageARGB;
+        info.ptOrigin=SGLPoint(-567,-637);
+        if(!check(!firstImage.CreateBuffer(info,SGLImageObject::bufferOnMemory,2,100),"offset animation fixture"))return false;
+        info.width=122;info.ptOrigin=SGLPoint(-1083,-637);
+        if(!check(!secondImage.CreateBuffer(info,SGLImageObject::bufferOnMemory,2,100),"second offset animation fixture"))return false;
+        ECSSprite first,second,hover;
+        first.NativeSprite().AttachImage(&firstImage);second.NativeSprite().AttachImage(&secondImage);
+        ECSStructure parameters;parameters.m_pwszTag=L"SpriteParam";
+        for(const auto* field:{L"ptDstPos",L"ptRevCenter"}) {
+            auto* point=new ECSStructure;point->m_pwszTag=L"Point";
+            point->SetMemberAsInt(L"x",0);point->SetMemberAsInt(L"y",0);
+            parameters.AddNewVariable(field,point);
+        }
+        auto read=[&] {
+            ECSObjArray<ECSObject> args;args.Add(new ECSReference(&hover));args.Add(new ECSReference(&parameters));
+            bool handled=false;const auto error=HandleLegacySpriteDraw(context,hover,L"GetParameter",args,handled);
+            std::unique_ptr<ECSObject> result(context.PopObject());
+            return !error&&handled&&result&&ECSObject::GetEntity(result.get())==&parameters;
+        };
+        auto set=[&] {
+            ECSObjArray<ECSObject> args;args.Add(new ECSReference(&hover));args.Add(new ECSReference(&parameters));
+            return invoke(hover,L"SetParameter",args);
+        };
+        auto at=[&](double x,double y) {
+            SGLPaintParam paint;SGLAffine affine;
+            return hover.NativeSprite().GetPaintParam(paint,affine)&&std::abs(affine.a13-x)<0.01&&std::abs(affine.a23-y)<0.01;
+        };
+        // Script UI swaps hotspot-bearing images, moves to (0,0), then moves
+        // the pivot to bottom-centre without changing where the image paints.
+        for(int pass=0;pass<4;++pass) {
+            auto& resource=pass%2?second:first;
+            const int left=pass%2?1083:567,width=pass%2?122:90;
+            ECSObjArray<ECSObject> args;args.Add(new ECSReference(&hover));args.Add(new ECSReference(&resource));
+            if(!check(invoke(hover,L"AttachImage",args),"replace offset animation"))return false;
+            hover.NativeSprite().SetPosition(0,0);
+            if(!check(read(),"read legacy parameters of hotspot-bearing image"))return false;
+            auto* pivot=MemberStruct(parameters,L"ptRevCenter");auto* position=MemberStruct(parameters,L"ptDstPos");
+            if(!check(pivot->GetMemberAsInt(L"x",0)==-left&&pivot->GetMemberAsInt(L"y",0)==-637&&at(left,637),
+                      "image replacement resets pivot to its hotspot without accumulating previous UI centres"))return false;
+            pivot->SetMemberAsInt(L"x",(width-1)/2);pivot->SetMemberAsInt(L"y",67);
+            position->SetMemberAsInt(L"x",left+(width-1)/2);position->SetMemberAsInt(L"y",704);
+            if(!check(set()&&at(left,637),"script pivot compensation preserves rendered hover position"))return false;
+            if(!check(read()&&set()&&at(left,637),"hotspot parameter round-trip does not shift pixels"))return false;
+        }
+        auto* pivot=MemberStruct(parameters,L"ptRevCenter");auto* position=MemberStruct(parameters,L"ptDstPos");
+        parameters.SetMemberAsInt(L"nFlags",0x41);
+        pivot->SetMemberAsInt(L"x",60*65536);pivot->SetMemberAsInt(L"y",67*65536);
+        position->SetMemberAsInt(L"x",1143*65536);position->SetMemberAsInt(L"y",704*65536);
+        if(!check(set()&&read()&&pivot->GetMemberAsInt(L"x",0)==60*65536&&at(1083,637),
+                  "fixed-point centres use absolute image coordinates exactly once"))return false;
+        ECSSprite copied;copied.NativeSprite().AttachImage(&firstImage);
+        ECSObjArray<ECSObject> args;args.Add(new ECSReference(&copied));args.Add(new ECSReference(&hover));
+        if(!check(invoke(copied,L"CopyParameters",args),"copy absolute legacy parameters between different image hotspots"))return false;
+        SGLPaintParam paint;SGLAffine affine;
+        if(!check(copied.NativeSprite().GetPaintParam(paint,affine)&&std::abs(affine.a13-1083)<0.01&&std::abs(affine.a23-637)<0.01,
+                  "copied pivot is independent of destination image hotspot"))return false;
     }
     ECSStructure rect;rect.m_pwszTag=L"Rect";
     rect.SetMemberAsInt(L"left",0);rect.SetMemberAsInt(L"top",0);rect.SetMemberAsInt(L"right",3);rect.SetMemberAsInt(L"bottom",3);

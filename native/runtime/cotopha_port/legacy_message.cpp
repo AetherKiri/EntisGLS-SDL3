@@ -204,7 +204,10 @@ public:
         SetMessageStyle(style);
         if(auto* exact=xml.GetElementTagAs(L"android_style")) {
             m_fsFont.nStyles=exact->GetAttrIntegerAs(L"font_flags",m_fsFont.nStyles);
-            if(const auto error=m_font.SetStyle(m_fsFont))return ESLError(error);
+            if(const auto error=m_font.SetStyle(m_fsFont)) {
+                Trace("restore-font-failed");
+                return ESLErrorMsg("Saved MessageSprite font could not be created");
+            }
             m_ltDecoration.nFlags=exact->GetAttrIntegerAs(L"flags",m_ltDecoration.nFlags);
             m_ltDecoration.rgbaBody=SGLPalette(uint32_t(exact->GetAttrIntegerAs(L"body",m_ltDecoration.rgbaBody.ui32)));
             m_ltDecoration.rgbaShadow=SGLPalette(uint32_t(exact->GetAttrIntegerAs(L"shadow",m_ltDecoration.rgbaShadow.ui32)));
@@ -277,7 +280,10 @@ ESLError ECSMessageSprite::Load(ESLFileObject& file,ECSContext& context) {
     if(in.error)return in.error;
     in.Bytes(blob.PutBuffer(length),length);blob.Flush(length);if(in.error)return in.error;
     EDescription description;
-    if(length)if(const auto error=description.ReadDescription(blob,EDescription::dftAuto,EDescription::ceUTF8))return error;
+    // Save writes XML fragments without an XML declaration. dftAuto selects
+    // the legacy C-escape dialect for those fragments, leaving entities such
+    // as &#32; in font names and subsequently splitting them at semicolons.
+    if(length)if(const auto error=description.ReadDescription(blob,EDescription::dftXML,EDescription::ceUTF8))return error;
     restoredStyle_=SSystem::SXMLDocument();CopyStyleXML(description,restoredStyle_);
     defaultCharSpeed_=in.I32();restoredAction_.msecPerChar=in.U32();defaultFade_=in.I32();restoredAction_.msecFade=in.U32();
     restoredBorder_=in.I32()!=0;inSize_=in.I32()!=0;messageRect_=in.Rect();

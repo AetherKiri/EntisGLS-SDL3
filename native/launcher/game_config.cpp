@@ -1,4 +1,5 @@
 #include "launcher/game_config.h"
+#include "launcher/config_encoding.h"
 #include "launcher/archive_launch_fallback.h"
 #include "io/game_files.h"
 
@@ -519,7 +520,7 @@ GameLaunchConfig NormalizeGameConfig(const fs::path& gameDir, const std::string&
     const auto root = Root(gameDir);
     if(xml.size()>maxXml) throw ConfigError("XML configuration exceeds 1 MiB");
     bool repairedUtf8=false;
-    XmlNode document = ParseXml(CleanUtf8(xml,repairedUtf8));
+    XmlNode document = ParseXml(CleanUtf8(DecodeConfigurationText(xml),repairedUtf8));
     XmlNode* script = nullptr;
     for (std::size_t i = 0; i < document.GetElementsCount(); ++i) {
         auto* node = document.GetElementAt(i);

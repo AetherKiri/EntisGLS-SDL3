@@ -1,0 +1,69 @@
+name: Aether runtime
+
+on:
+  push:
+    branches: [aether]
+  pull_request:
+    branches: [aether]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aether-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  entisgls-tests:
+    name: EntisGLS Runtime Tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Checkout public provider ABI
+        uses: actions/checkout@v6
+        with:
+          repository: AetherKiri/Aether
+          ref: 7aedd3b01ca80c0d0c009231891388fc3e22703d
+          path: .ci-public
+          persist-credentials: false
+          sparse-checkout: abi/include
+      - name: Install EntisGLS test dependencies
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y cmake ninja-build pkg-config bison \
+              libfreetype-dev nlohmann-json3-dev \
+              libgl1-mesa-dev libegl-dev libgles-dev \
+              libx11-dev libxrandr-dev libxcursor-dev libxi-dev \
+              libxext-dev libxfixes-dev libxrender-dev libxss-dev libxtst-dev \
+              libwayland-dev libxkbcommon-dev libasound2-dev libpulse-dev \
+              libudev-dev libdbus-1-dev
+          else
+            brew install cmake ninja bison freetype nlohmann-json
+            echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
+            echo "CMAKE_PREFIX_PATH=$(brew --prefix)" >> "$GITHUB_ENV"
+          fi
+      - name: Configure standalone EntisGLS regressions
+        run: |
+          cmake -S aether_runtime -B out/entisgls -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DAETHER_ENTISGLS_HOST_ROOT="$GITHUB_WORKSPACE/.ci-public" \
+            -DAETHERKIRI_BUILD_ENTISGLS_TESTS=ON
+      - name: Build default test targets
+        run: cmake --build out/entisgls --parallel 2
+      - name: Run synthetic EntisGLS regressions
+        run: ctest --test-dir out/entisgls --output-on-failure --no-tests=error --parallel 2
+

@@ -61,6 +61,7 @@ def stdapi(source):
     start = source.index("#include <esl/esl_java_object.h>")
     end = source.index("using namespace SSystem")
     source = source[:start] + '''#include "platform/sdl/system.h"
+#include "platform/sdl/runtime_control.h"
 #include <SDL3/SDL.h>
 #include <cstdlib>
 #include <cstdarg>
@@ -77,8 +78,8 @@ def stdapi(source):
     source = replace_once(source, "SSystem::eslHeapUninitialize() ;", "SSystem::eslHeapUninitialize() ;\n        study::platform::sdl::ReleaseSystemPaths();")
     replacements = {
         "SSystem::GetMemoryStatus": "study::platform::sdl::FillMemoryStatus(mstatus);",
-        "SSystem::ResetCurrentMilliSec": "g_nLastTime = SDL_GetTicks() - timeStart;",
-        "SSystem::CurrentMilliSec": "return SDL_GetTicks() - g_nLastTime;",
+        "SSystem::ResetCurrentMilliSec": "g_nLastTime = study::platform::sdl::RuntimeMilliseconds() - timeStart;",
+        "SSystem::CurrentMilliSec": "return study::platform::sdl::RuntimeMilliseconds() - g_nLastTime;",
         "SSystem::GetPerformanceCounter": "return static_cast<int64_t>(SDL_GetPerformanceCounter());",
         "SSystem::GetPerformanceFrequency": "return static_cast<int64_t>(SDL_GetPerformanceFrequency());",
         "SSystem::SleepMilliSec": "if (msec >= 0) SDL_Delay(static_cast<Uint32>(msec));",

@@ -1,5 +1,5 @@
 # Platform entry points, resource packaging and application composition.
-set(SDL_APP_SOURCES native/launcher/psb_key_dialog.cpp native/launcher/game_config.cpp native/compatibility/games/known_game.cpp
+set(SDL_APP_SOURCES native/launcher/psb_key_dialog.cpp native/launcher/game_config.cpp native/launcher/config_encoding.cpp native/compatibility/games/known_game.cpp
     native/launcher/archive_launch_fallback.cpp
     native/io/save_directory.cpp
     native/compatibility/games/compatibility_profiles.cpp apps/launcher/main.cpp "${LEGACY_HEAP_SDK}"

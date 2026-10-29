@@ -250,7 +250,7 @@ void SakuraGL::AddProductedVector1DArray
 	#elif	defined(__PROCESSOR_ARM__) && (__PROCESSOR_ARM__ >= 7)
 	if ( SSystem::g_cpuFeatures & SSystem::cpuARM_Feature_NEON )
 	{
-		ESLAssert( g_cpuFamily == cpuFamily_ARM ) ;
+		ESLAssert( (g_cpuFamily == cpuFamily_ARM) || (g_cpuFamily == cpuFamily_ARM64) ) ;
 		AddProductedVector1DArray_NEON( pfpDst, pfpSrc, fpWeight, nCount ) ;
 	}
 	else
@@ -293,7 +293,7 @@ void SakuraGL::AddProductedVector2DArray
 	#elif	defined(__PROCESSOR_ARM__) && (__PROCESSOR_ARM__ >= 7)
 	if ( SSystem::g_cpuFeatures & SSystem::cpuARM_Feature_NEON )
 	{
-		ESLAssert( g_cpuFamily == cpuFamily_ARM ) ;
+		ESLAssert( (g_cpuFamily == cpuFamily_ARM) || (g_cpuFamily == cpuFamily_ARM64) ) ;
 		AddProductedVector1DArray_NEON
 			( &pvDst->x, &pvSrc->x, fpWeight, nCount * 2 ) ;
 	}
@@ -334,7 +334,7 @@ void SakuraGL::AddProductedVector4DArray
 	#elif	defined(__PROCESSOR_ARM__) && (__PROCESSOR_ARM__ >= 7)
 	if ( SSystem::g_cpuFeatures & SSystem::cpuARM_Feature_NEON )
 	{
-		ESLAssert( g_cpuFamily == cpuFamily_ARM ) ;
+		ESLAssert( (g_cpuFamily == cpuFamily_ARM) || (g_cpuFamily == cpuFamily_ARM64) ) ;
 		AddProductedVector4DArray_NEON( pvDst, pvSrc, fpWeight, nCount ) ;
 	}
 	else
@@ -408,7 +408,7 @@ void SakuraGL::AddProductedVector4DArrayWithWeight
 	#elif	defined(__PROCESSOR_ARM__) && (__PROCESSOR_ARM__ >= 7)
 	if ( SSystem::g_cpuFeatures & SSystem::cpuARM_Feature_NEON )
 	{
-		ESLAssert( g_cpuFamily == cpuFamily_ARM ) ;
+		ESLAssert( (g_cpuFamily == cpuFamily_ARM) || (g_cpuFamily == cpuFamily_ARM64) ) ;
 		AddProductedVector4DArrayWithWeight_NEON
 				( pvDst, pvSrc, pfpWeightMap, fpWeight, nCount ) ;
 	}
@@ -481,7 +481,7 @@ void SakuraGL::AddProductedVector4DArrayWithNegWeight
 	#elif	defined(__PROCESSOR_ARM__) && (__PROCESSOR_ARM__ >= 7)
 	if ( SSystem::g_cpuFeatures & SSystem::cpuARM_Feature_NEON )
 	{
-		ESLAssert( g_cpuFamily == cpuFamily_ARM ) ;
+		ESLAssert( (g_cpuFamily == cpuFamily_ARM) || (g_cpuFamily == cpuFamily_ARM64) ) ;
 		AddProductedVector4DArrayWithNegWeight_NEON
 				( pvDst, pvSrc, pfpWeightMap, nCount ) ;
 	}
@@ -589,7 +589,7 @@ void S3DMatrix::RevolveVectors
 	#elif	defined(__PROCESSOR_ARM__) && (__PROCESSOR_ARM__ >= 7)
 	if ( SSystem::g_cpuFeatures & SSystem::cpuARM_Feature_NEON )
 	{
-		ESLAssert( g_cpuFamily == cpuFamily_ARM ) ;
+		ESLAssert( (g_cpuFamily == cpuFamily_ARM) || (g_cpuFamily == cpuFamily_ARM64) ) ;
 		RevolveVectors_NEON( pvDst, pvSrc, nCount, vOffset ) ;
 	}
 	else
@@ -666,7 +666,7 @@ void S3DMatrix::AddRevolvedVectorsWithWeight
 	#elif	defined(__PROCESSOR_ARM__) && (__PROCESSOR_ARM__ >= 7)
 	if ( SSystem::g_cpuFeatures & SSystem::cpuARM_Feature_NEON )
 	{
-		ESLAssert( g_cpuFamily == cpuFamily_ARM ) ;
+		ESLAssert( (g_cpuFamily == cpuFamily_ARM) || (g_cpuFamily == cpuFamily_ARM64) ) ;
 		AddRevolvedVectorsWithWeight_NEON
 			( pvDst, pvSrc, pWeight, nCount, vOffset ) ;
 	}

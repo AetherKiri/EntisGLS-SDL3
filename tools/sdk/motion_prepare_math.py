@@ -10,14 +10,14 @@ import sys as _sys
 from pathlib import Path as _BootstrapPath
 _sys.path.insert(0, str(next(parent / "tools" for parent in _BootstrapPath(__file__).resolve().parents
                              if (parent / "tools" / "_bootstrap.py").is_file())))
-from _bootstrap import ROOT
+from _bootstrap import ROOT, GENERATED_ROOT
 
 from pathlib import Path
 import hashlib
 import json
 
 SOURCE = ROOT / 'vendor/kirikiroid2/motionplayer'
-OUT = ROOT / 'build/generated/motion'
+OUT = GENERATED_ROOT / 'motion'
 
 
 def extract(text, marker):

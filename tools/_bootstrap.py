@@ -13,3 +13,6 @@ for _category in ("diagnostics", "sdk", "ci", "build"):
     _directory = str(ROOT / "tools" / _category)
     if _directory not in sys.path:
         sys.path.insert(0, _directory)
+
+import os
+GENERATED_ROOT = Path(os.environ.get("ENTISGLS_GENERATED_ROOT", str(ROOT / "build/generated")))

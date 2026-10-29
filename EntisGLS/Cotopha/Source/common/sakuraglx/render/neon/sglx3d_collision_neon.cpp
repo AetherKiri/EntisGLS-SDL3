@@ -98,7 +98,7 @@ bool S3DCollision::DoesTriangleMeshHitAgainstSphere_NEON
 		const S3DVector& vPos, float fpRadius,
 		S3DCollision::Result& rsHit, size_t iFirstPoly )
 {
-	ESLAssert( g_cpuFamily == cpuFamily_ARM ) ;
+	ESLAssert( (g_cpuFamily == cpuFamily_ARM) || (g_cpuFamily == cpuFamily_ARM64) ) ;
 	//
 	QuadSphereCollision *	pSphereCol = pMeshCol->pSphereCol ;
 	QuadPolygonsCollision *	pCollision = pMeshCol->pCollision ;
@@ -349,7 +349,7 @@ bool S3DCollision::IsSegmentCrossingTriangleMesh_NEON
 		const S3DVector& vPos0, const S3DVector& vPos1,
 			float fpErrorGap, S3DCollision::Result& rsCross )
 {
-	ESLAssert( g_cpuFamily == cpuFamily_ARM ) ;
+	ESLAssert( (g_cpuFamily == cpuFamily_ARM) || (g_cpuFamily == cpuFamily_ARM64) ) ;
 	//
 	QuadSphereCollision *	pSphereCol = pMeshCol->pSphereCol ;
 	QuadPolygonsCollision *	pCollision = pMeshCol->pCollision ;

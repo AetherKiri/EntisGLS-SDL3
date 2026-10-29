@@ -10,6 +10,7 @@
 #include <limits>
 #include <mutex>
 #include <set>
+#include <map>
 #include <thread>
 #include <vector>
 
@@ -19,7 +20,12 @@ struct MasterVolume {
     std::mutex mutex;
     float volume = 1.0f;
     std::set<SDL_AudioStream*> streams;
+    std::map<SDL_AudioStream*,bool> playback;
+    bool paused=false;
 };
+std::mutex audioLifecycle;
+bool AcquireAudio() {std::lock_guard<std::mutex> lock(audioLifecycle);return SDL_InitSubSystem(SDL_INIT_AUDIO);}
+void ReleaseAudio() {std::lock_guard<std::mutex> lock(audioLifecycle);SDL_QuitSubSystem(SDL_INIT_AUDIO);}
 MasterVolume& Master() {
     static MasterVolume master;
     return master;
@@ -29,13 +35,32 @@ bool RegisterMasterStream(SDL_AudioStream* stream) {
     std::lock_guard<std::mutex> lock(master.mutex);
     if (!SDL_SetAudioStreamGain(stream, master.volume)) return false;
     master.streams.insert(stream);
+    master.playback[stream]=false;
     return true;
 }
 void UnregisterMasterStream(SDL_AudioStream* stream) {
     auto& master = Master();
     std::lock_guard<std::mutex> lock(master.mutex);
     master.streams.erase(stream);
+    master.playback.erase(stream);
 }
+bool ResumeStream(SDL_AudioStream* stream) {
+    auto& master=Master();std::lock_guard<std::mutex> lock(master.mutex);
+    if(!master.paused&&!SDL_ResumeAudioStreamDevice(stream))return false;
+    master.playback[stream]=true;return true;
+}
+bool PauseStream(SDL_AudioStream* stream) {
+    auto& master=Master();std::lock_guard<std::mutex> lock(master.mutex);
+    if(!SDL_PauseAudioStreamDevice(stream))return false;
+    master.playback[stream]=false;return true;
+}
+}
+
+bool SetSdlRuntimeAudioPaused(bool paused) {
+    auto& master=Master();std::lock_guard<std::mutex> lock(master.mutex);
+    for(const auto& item:master.playback)
+        if(!(paused||!item.second?SDL_PauseAudioStreamDevice(item.first):SDL_ResumeAudioStreamDevice(item.first)))return false;
+    master.paused=paused;return true;
 }
 
 bool GetSdlMasterVolume(float& volume) {
@@ -196,7 +221,7 @@ struct SdlPcmStream::State {
                 if (!loop && staticCursor == staticData.size() / format.channels && queued == 0) {
                     stoppedPosition = positionBase + submittedFrames;
                     playing = false;
-                    if (!SDL_PauseAudioStreamDevice(stream)) Fail("pause drained stream");
+                    if (!PauseStream(stream)) Fail("pause drained stream");
                 }
                 continue;
             }
@@ -240,19 +265,19 @@ bool SdlPcmStream::Open(Format format, std::function<void()> workerFinalizer) {
     if (!Close()) return false;
     auto& s = *state_;
     std::lock_guard<std::mutex> lock(s.mutex);
-    if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) return s.Fail("initialize audio");
+    if (!AcquireAudio()) return s.Fail("initialize audio");
     s.ownsAudio = true;
     SDL_AudioSpec spec{SDL_AUDIO_F32, int(format.channels), int(format.frequency)};
     s.stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
     if (!s.stream) {
-        SDL_QuitSubSystem(SDL_INIT_AUDIO);
+        ReleaseAudio();
         s.ownsAudio = false;
         return s.Fail("open playback device");
     }
     if (!RegisterMasterStream(s.stream)) {
         SDL_DestroyAudioStream(s.stream);
         s.stream = nullptr;
-        SDL_QuitSubSystem(SDL_INIT_AUDIO);
+        ReleaseAudio();
         s.ownsAudio = false;
         return s.Fail("apply application master volume");
     }
@@ -281,7 +306,7 @@ bool SdlPcmStream::Open(Format format, std::function<void()> workerFinalizer) {
         UnregisterMasterStream(s.stream);
         SDL_DestroyAudioStream(s.stream);
         s.stream = nullptr;
-        SDL_QuitSubSystem(SDL_INIT_AUDIO);
+        ReleaseAudio();
         s.ownsAudio = false;
         SDL_SetError("cannot start PCM refill thread");
         return s.Fail("create refill thread");
@@ -306,7 +331,7 @@ bool SdlPcmStream::Close() {
         SDL_DestroyAudioStream(s.stream);
     }
     s.stream = nullptr;
-    if (s.ownsAudio) SDL_QuitSubSystem(SDL_INIT_AUDIO);
+    if (s.ownsAudio) ReleaseAudio();
     s.ownsAudio = false;
     s.staticData.clear();
     s.scratch.clear();
@@ -375,7 +400,7 @@ bool SdlPcmStream::Play(bool loop) {
         s.stoppedPosition = s.positionBase;
         if (!s.FeedStatic()) return false;
     }
-    if (!SDL_ResumeAudioStreamDevice(s.stream)) return s.Fail("resume playback");
+    if (!ResumeStream(s.stream)) return s.Fail("resume playback");
     s.playing = true;
     s.wake.notify_all();
     return true;
@@ -385,7 +410,7 @@ bool SdlPcmStream::Stop() {
     auto& s = *state_;
     std::lock_guard<std::mutex> lock(s.mutex);
     if (!s.stream || s.closing) return false;
-    if (!SDL_PauseAudioStreamDevice(s.stream)) return s.Fail("stop playback");
+    if (!PauseStream(s.stream)) return s.Fail("stop playback");
     s.stoppedPosition = s.Position();
     s.playing = false;
     s.pauseCount = 0;
@@ -402,7 +427,7 @@ bool SdlPcmStream::Pause() {
     auto& s = *state_;
     std::lock_guard<std::mutex> lock(s.mutex);
     if (!s.stream || !s.playing || s.closing || s.failed || s.pauseCount == std::numeric_limits<unsigned>::max()) return false;
-    if (!s.pauseCount && !SDL_PauseAudioStreamDevice(s.stream)) return s.Fail("pause playback");
+    if (!s.pauseCount && !PauseStream(s.stream)) return s.Fail("pause playback");
     ++s.pauseCount;
     return true;
 }
@@ -411,7 +436,7 @@ bool SdlPcmStream::Restart() {
     auto& s = *state_;
     std::lock_guard<std::mutex> lock(s.mutex);
     if (!s.stream || !s.playing || !s.pauseCount || s.closing || s.failed) return false;
-    if (s.pauseCount == 1 && !SDL_ResumeAudioStreamDevice(s.stream)) return s.Fail("restart playback");
+    if (s.pauseCount == 1 && !ResumeStream(s.stream)) return s.Fail("restart playback");
     --s.pauseCount;
     s.wake.notify_all();
     return true;
@@ -443,13 +468,13 @@ bool SdlPcmStream::SeekPosition(std::uint64_t byteOffset) {
     if (!s.stream || !s.prepared || !s.staticMode || s.closing || s.failed || byteOffset % s.frameBytes) return false;
     const auto frame = byteOffset / s.frameBytes;
     if (frame >= s.staticData.size() / s.format.channels) return false;
-    if (!SDL_PauseAudioStreamDevice(s.stream)) return s.Fail("pause for seek");
+    if (!PauseStream(s.stream)) return s.Fail("pause for seek");
     if (!s.ResetQueue()) return false;
     s.staticStart = s.staticCursor = std::size_t(frame);
     s.positionBase = s.stoppedPosition = frame;
     if (s.playing) {
         if (!s.FeedStatic()) return false;
-        if (!s.pauseCount && !SDL_ResumeAudioStreamDevice(s.stream)) return s.Fail("resume after seek");
+        if (!s.pauseCount && !ResumeStream(s.stream)) return s.Fail("resume after seek");
     }
     return true;
 }

@@ -1,6 +1,7 @@
 #pragma once
 #include <sakuraglx/sprite/sglx_sprite.h>
 #include "runtime/cotopha_port/legacy_sprite_dynamic.h"
+#include "runtime/cotopha_port/legacy_sprite_projection.h"
 
 class ECSContext;
 class ECSExecutionImage;
@@ -32,6 +33,35 @@ bool InvokeLegacySpriteCallback(const SakuraGL::SGLSprite*, LegacySpriteCallback
 template<class Base> class LegacyCallbackSprite : public Base {
 public:
     using Base::Base;
+    bool GetPaintParam(SakuraGL::SGLPaintParam& paint, SakuraGL::SGLAffine& affine,
+        const SakuraGL::SGLSprite::Virtual3DParam* view=nullptr,
+        SakuraGL::SGLSprite::Stereo3DView stereo=SakuraGL::SGLSprite::s3dMonoview) const override {
+        double focal = 0; bool fixed = false;
+        if (!GetLegacySpriteZScale(this, focal, fixed)) return Base::GetPaintParam(paint, affine, view, stereo);
+        SakuraGL::SGLSprite::Virtual3DParam defaultView;
+        if (!view) if (auto* parent = Base::GetParent()) {
+            view = parent->GetVirtual3DParam();
+            if (!view) {
+                const auto size = parent->GetImageSize();
+                defaultView.m_vProjectScreen = size.w && size.h ?
+                    SakuraGL::S3DVector(size.w * 0.5, size.h * 0.5, std::min(size.w, size.h)) :
+                    SakuraGL::S3DVector(0, 0, 1024);
+                view = &defaultView;
+            }
+        }
+        auto param = Base::GetParameter();
+        LegacySpriteCamera camera;
+        GetLegacySpriteCamera(Base::GetParent(), camera);
+        if (!ProjectLegacySprite(param, focal, fixed, view, &camera)) return false;
+        paint.SetAffine(affine, param.vDst.x, param.vDst.y,
+            param.vCenter.x + this->m_vImageCenter.x, param.vCenter.y + this->m_vImageCenter.y,
+            param.vZoom.x, param.vZoom.y, param.zAngle, param.xyCross);
+        paint.nFlags = param.nFlags | SakuraGL::paintDelayable;
+        paint.nTransparency = param.nTransparency; paint.zOrder = float(param.vDst.z);
+        paint.rgbColorParam = param.rgbColorParam; paint.countVertex = uint32_t(param.countVertex);
+        paint.pVertices = param.pVertices;
+        return true;
+    }
     void Draw(SakuraGL::S3DRenderContextInterface& render,
               const SakuraGL::SGLSprite::Virtual3DParam* view=nullptr,
               SakuraGL::SGLSprite::Stereo3DView stereo=SakuraGL::SGLSprite::s3dMonoview) const override {

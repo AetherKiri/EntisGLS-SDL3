@@ -42,7 +42,7 @@ if(NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
         native/compatibility/games/compatibility_profiles.cpp native/platform/sdl/game_font_aliases.cpp native/platform/sdl/opentype_font.cpp)
     target_link_libraries(legacy_emote_api_test PRIVATE legacy_objects legacy_foundation gls4_sdl motion_apk_runtime freetype)
     add_executable(launcher_config_test EXCLUDE_FROM_ALL tests/integration/launcher/game_config_test.cpp
-        native/launcher/game_config.cpp native/launcher/archive_launch_fallback.cpp)
+        native/launcher/game_config.cpp native/launcher/config_encoding.cpp native/launcher/archive_launch_fallback.cpp)
     target_link_libraries(launcher_config_test PRIVATE gls4_sdl)
     add_executable(launcher_fonts_test EXCLUDE_FROM_ALL tests/integration/launcher/generic_fonts_test.cpp
         native/platform/sdl/game_font_aliases.cpp native/platform/sdl/opentype_font.cpp native/compatibility/games/compatibility_profiles.cpp)

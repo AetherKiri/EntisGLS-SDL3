@@ -14,4 +14,9 @@ bool HasWindows();
 // successful draw and before presentation. Pass nullptr to disable.
 void SetFrameObserver(void (*observer)(SDL_Window*, void*), void* user);
 void SetWindowDrawHandler(bool (*handler)(SakuraGL::SGLGenericWindow*));
+// Configure before creating SDK windows. The host owns display and input.
+void SetEmbeddedPresentation(bool embedded);
+void SetEmbeddedPlatformRequest(void (*request)(void*, const char*, const char*), void* user);
+bool DispatchHostEvent(SDL_Event event);
+bool HostTextInputActive();
 }

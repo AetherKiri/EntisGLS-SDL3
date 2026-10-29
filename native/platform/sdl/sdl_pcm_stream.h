@@ -13,6 +13,7 @@ namespace studysteady::platform {
 // this does not change an operating-system or hardware volume setting.
 bool GetSdlMasterVolume(float& volume);
 bool SetSdlMasterVolume(float volume);
+bool SetSdlRuntimeAudioPaused(bool paused);
 
 // Device-facing PCM output, independent of the SDK and its decoder classes.
 // Input PCM is little endian, matching the game archives. Positions count

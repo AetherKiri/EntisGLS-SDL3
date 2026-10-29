@@ -18,5 +18,10 @@
                 "Primary reference step=%zu parent=%p type=%ls slot=%d target=%p targetType=%ls",
                 i, step.parent, step.parent ? step.parent->GetTypeName() : L"<null>", step.slot,
                 step.target, step.target ? step.target->GetTypeName() : L"<null>");
+            if(auto* hash=ESLTypeCast<ECSHash>(step.parent)) {
+                study::platform::LogPrint(study::platform::LogPriority::Error,"StudySteady","Reference hash count=%u",hash->m_varArray.GetSize());
+                for(size_t j=0;j<std::min<size_t>(hash->m_varArray.GetSize(),8);++j)if(auto* entry=hash->m_varArray.GetAt(j))
+                    study::platform::LogPrint(study::platform::LogPriority::Error,"StudySteady","Reference hash item=%zu key=%ls value=%p type=%ls",j,entry->Tag().CharPtr(),entry->GetObject(),entry->GetObject()?entry->GetObject()->GetTypeName():L"<null>");
+            }
         }
     };

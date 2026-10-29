@@ -8,6 +8,7 @@
 struct LegacySpriteDrawState;
 struct LegacySpriteCallbackState;
 class ECSResourceManager;
+void VisitLegacySprites(void (*visitor)(const SakuraGL::SGLSprite&, void*), void* user);
 
 class ECSSprite : public ECSResource {
 public:

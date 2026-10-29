@@ -3,7 +3,19 @@
 #include "runtime/cotopha_port/legacy_speech.h"
 #include <atomic>
 #include <stdexcept>
+#include <cstdarg>
+#include <cstdio>
 #include "platform/log.h"
+
+extern "C" void _ESLTrace(const char* format, ...) {
+    va_list args; va_start(args, format);
+    char text[4096]; std::vsnprintf(text, sizeof(text), format, args); va_end(args);
+    study::platform::LogWrite(study::platform::LogPriority::Debug, "Cotopha", text);
+}
+extern "C" void _ESLAssert(const char* expression, const char* file, int line) {
+    study::platform::LogPrint(study::platform::LogPriority::Error, "Cotopha",
+        "Assertion %s:%d: %s", file, line, expression);
+}
 
 namespace {
 LegacyPlatformObjectFactory platformFactory = nullptr;

@@ -53,17 +53,17 @@ public:
     ESLError Error() const { return error_.load(); }
     LegacyVolumePoint Endpoint() const { return curve_.back(); }
     void Run() override {
-        using Clock = std::chrono::steady_clock;
         using Milliseconds = std::chrono::milliseconds;
-        const auto start = Clock::now(), end = start + Milliseconds(duration_);
-        auto next = start;
+        // Match the VM/animation clock: host suspension must freeze fades as
+        // well as the audio device, without blocking Cancel() during shutdown.
+        const auto start = SSystem::CurrentMilliSec();
+        unsigned delay = 0;
         for (;;) {
             {
                 std::unique_lock<std::mutex> lock(waitMutex_);
-                if (wake_.wait_until(lock, next, [this] { return cancelled_; })) break;
+                if (wake_.wait_for(lock, Milliseconds(delay), [this] { return cancelled_; })) break;
             }
-            const auto now = Clock::now();
-            const auto elapsed = std::chrono::duration_cast<Milliseconds>(now - start).count();
+            const auto elapsed = static_cast<unsigned>(SSystem::CurrentMilliSec() - start);
             // EGLSTime quantizes the full interval to 0x10000 before evaluating
             // the curve; preserve that sampling, including the exact endpoint.
             const uint64_t offset = std::min<uint64_t>(0x10000,
@@ -76,7 +76,7 @@ public:
                 break;
             }
             if (offset == 0x10000) break;
-            next = std::min(now + Milliseconds(66), end);
+            delay = std::min(66u, duration_ - std::min(duration_, elapsed));
         }
         pending_.store(false);
     }

@@ -15,6 +15,7 @@ ESLError HandleLegacySpriteDraw(ECSContext &, ECSSprite &, const wchar_t *method
 void ResetLegacySpriteDrawState(ECSSprite &,bool preserveTone=false);
 bool CheckLegacySpriteDraw();
 bool LegacyEffectAnimationEnabled();
+bool ReadLegacySpriteZScale(ECSSprite&, double& focal, bool& fixed);
 ESLError SaveLegacySpriteVisual(ESLFileObject&,ECSSprite&);
 ESLError LoadLegacySpriteVisual(ESLFileObject&,ECSSprite&);
 ESLError SaveLegacySpriteAnimation(ESLFileObject&,ECSSprite&);

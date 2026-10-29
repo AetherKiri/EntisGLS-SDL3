@@ -2,13 +2,9 @@
 # compatibility copies remain in the build directory; originals stay unchanged.
 include("${CMAKE_CURRENT_LIST_DIR}/entis_sdk.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/sdk_generation.cmake")
-entis_track_sdk_generation()
 set(LEGACY_PORT_ROOT "${CMAKE_CURRENT_LIST_DIR}/../native/compatibility/sdk/legacy")
 set(LEGACY_RUNTIME_ROOT "${CMAKE_CURRENT_LIST_DIR}/../native/runtime/cotopha_port")
 set(LEGACY_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/legacy_generated")
-file(GLOB LEGACY_PATCH_TOOLS CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/../tools/sdk/patch_legacy_*.py")
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_LIST_DIR}/../tools/sdk/prepare_cotopha.py" ${LEGACY_PATCH_TOOLS})
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/../tools/sdk/prepare_cotopha.py"
     --legacy "${LEGACY_ROOT}" --output "${LEGACY_GENERATED}"

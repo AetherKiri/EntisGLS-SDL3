@@ -5717,7 +5717,7 @@ void S3DRenderBuffer::MoveVertexAndCubeRange
 	#elif	defined(__PROCESSOR_ARM__) && (__PROCESSOR_ARM__ >= 7) && !defined(__PROCESSOR_ARM64__)
 	if ( SSystem::g_cpuFeatures & SSystem::cpuARM_Feature_NEON )
 	{
-		ESLAssert( g_cpuFamily == cpuFamily_ARM ) ;
+		ESLAssert( (g_cpuFamily == cpuFamily_ARM) || (g_cpuFamily == cpuFamily_ARM64) ) ;
 		//
 		S3DVector4	vMaxMin[2] ;
 		//

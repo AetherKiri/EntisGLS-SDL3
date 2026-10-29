@@ -115,6 +115,13 @@ int RunLegacyGame(const wchar_t *arguments, const entis::launcher::GameLaunchCon
             [&](const wchar_t* path) { return environment.NewOpenFile(path, SSystem::SFileOpener::shareRead); }, Wide(font.family));
         if (!registered.loaded) return Fail(38, "Cannot load font " + font.path + ": " + registered.error);
     }
+    for (const auto& path : launch->bundledFonts) {
+        // A private stock name preserves each face, while the first registered
+        // family (including explicit XML fonts) remains authoritative.
+        RegisterOpenTypeFont(Wide(path), {},
+            [&](const wchar_t* name) { return environment.NewOpenFile(name, SSystem::SFileOpener::shareRead); },
+            Wide("@bundled:" + path));
+    }
     for (const auto& alias : launch->fontAliases)
         if (!RegisterFontAlias(Wide(alias.alias), Wide(alias.source)))
             return Fail(37, "Cannot register font alias " + alias.alias + " -> " + alias.source);

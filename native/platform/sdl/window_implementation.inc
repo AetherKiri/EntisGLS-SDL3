@@ -21,6 +21,12 @@ namespace {
 void (*frameObserver)(SDL_Window*, void*) = nullptr;
 void* frameObserverUser = nullptr;
 bool (*windowDrawHandler)(SakuraGL::SGLGenericWindow*) = nullptr;
+bool embeddedPresentation = false;
+void (*embeddedRequest)(void*, const char*, const char*) = nullptr;
+void* embeddedRequestUser = nullptr;
+void HostRequest(const char* operation, const std::string& argument) {
+    if (embeddedRequest) embeddedRequest(embeddedRequestUser, operation, argument.c_str());
+}
 struct SDLPendingEvent {
     SDL_Event event{};
     std::string text;
@@ -45,6 +51,7 @@ struct SDLWindowState {
     SDL_GLContext context = nullptr;
     bool active = true;
     bool background = false;
+    bool textInput = false, cursorVisible = true;
     bool closing = false, executing = false, drainingEvents = false;
     std::map<SDL_FingerID, int> fingers;
     std::set<int> pressedKeys;
@@ -181,10 +188,11 @@ SGLError SGLGenericWindow::CreateWindowSimply(const wchar_t* title, uint32_t wid
             SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
             SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
             const auto caption = WindowUTF8(title);
-            const int initialWidth = std::min<int>(width, 1280);
+            const int initialWidth = embeddedPresentation ? int(width) : std::min<int>(width, 1280);
             const int initialHeight = std::max(1, int(double(height) * initialWidth / width));
-            const SDL_WindowFlags flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE |
-                SDL_WINDOW_HIGH_PIXEL_DENSITY | (m_flagFullscreen ? SDL_WINDOW_FULLSCREEN : 0);
+            const SDL_WindowFlags flags = embeddedPresentation ? SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN :
+                SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
+                (m_flagFullscreen ? SDL_WINDOW_FULLSCREEN : 0);
             if (!study::platform::sdl::ApplyMobileGameOrientation(state->orientation, nullptr, width, height)) {
                 Trace("SDL game orientation: %s\n", SDL_GetError()); return sglErrFailed;
             }
@@ -287,12 +295,18 @@ void SGLGenericWindow::SetOptionalFlags(uint64_t flags) {
     WindowMain(m_pMutexUI, [&] {
         if (auto* state = StateFor(this)) {
             bool success = true;
-            if (flags & flagDoMinimize) success &= SDL_MinimizeWindow(state->window);
-            if (flags & flagDoMaximize) success &= SDL_MaximizeWindow(state->window);
-            if (flags & flagDoNormalize) success &= SDL_RestoreWindow(state->window);
-            if (flags & (flagOpenIME | flagEnableIME)) success &= SDL_StartTextInput(state->window);
-            else success &= SDL_StopTextInput(state->window);
-            success &= flags & flagInvisibleWindow ? SDL_HideWindow(state->window) : SDL_ShowWindow(state->window);
+            if (!embeddedPresentation) {
+                if (flags & flagDoMinimize) success &= SDL_MinimizeWindow(state->window);
+                if (flags & flagDoMaximize) success &= SDL_MaximizeWindow(state->window);
+                if (flags & flagDoNormalize) success &= SDL_RestoreWindow(state->window);
+            }
+            state->textInput = (flags & (flagOpenIME | flagEnableIME)) != 0;
+            if (!embeddedPresentation) {
+                if (state->textInput) success &= SDL_StartTextInput(state->window);
+                else success &= SDL_StopTextInput(state->window);
+            }
+            if (!embeddedPresentation)
+                success &= flags & flagInvisibleWindow ? SDL_HideWindow(state->window) : SDL_ShowWindow(state->window);
             if (!success) Trace("SDL optional window flags: %s\n", SDL_GetError());
         }
     });
@@ -300,6 +314,7 @@ void SGLGenericWindow::SetOptionalFlags(uint64_t flags) {
 SGLError SGLGenericWindow::ChangeCooperationLevel(Window::CooperationMode mode) {
     const bool fullscreen = mode == Window::modeFullScreen || mode == Window::modeExclusive;
     const bool changed = WindowMain(m_pMutexUI, [&] {
+        if (embeddedPresentation) { HostRequest("runtime_window_mode", fullscreen ? "fullscreen" : "windowed"); return true; }
         auto* state = StateFor(this); return state && SDL_SetWindowFullscreen(state->window, fullscreen);
     });
     if (!changed) return sglErrFailed;
@@ -315,6 +330,7 @@ SGLError SGLGenericWindow::ChangeDisplaySize(uint32_t width, uint32_t height,
             SDLUILock lock(m_pMutexUI);
             if (!lock.locked) { retry = !callerMain; return sglErrFailed; }
             if (m_wvfFramework.GetView()) {
+                if (embeddedPresentation && !SDL_SetWindowSize(state->window, width, height)) return sglErrFailed;
                 m_sizeVirtual = SGLSize(width, height);
                 m_sizeLayoutOriginal = m_sizeVirtual;
                 m_nBitsPerPixel = depth; m_nFrequency = frequency;
@@ -392,9 +408,18 @@ SGLError SGLGenericWindow::SetWindowCaption(const wchar_t* text) {
         return s && SDL_SetWindowTitle(s->window, WindowUTF8(text).c_str()) ? sglErrSuccess : sglErrFailed;});
 }
 SGLError SGLGenericWindow::ShowCursor(bool show) {
-    return WindowMain(m_pMutexUI, [&] {return (show ? SDL_ShowCursor() : SDL_HideCursor()) ? sglErrSuccess : sglErrFailed;});
+    return WindowMain(m_pMutexUI, [&] {
+        if (embeddedPresentation) {
+            if (auto* state=StateFor(this)) state->cursorVisible=show;
+            HostRequest("runtime_cursor_visible", show ? "visible=1" : "visible=0");return sglErrSuccess;
+        }
+        return (show ? SDL_ShowCursor() : SDL_HideCursor()) ? sglErrSuccess : sglErrFailed;
+    });
 }
-bool SGLGenericWindow::IsShowCursor() {return WindowMain(m_pMutexUI, [] {return SDL_CursorVisible();});}
+bool SGLGenericWindow::IsShowCursor() {return WindowMain(m_pMutexUI, [&] {
+    if (embeddedPresentation) {auto* state=StateFor(this);return !state||state->cursorVisible;}
+    return SDL_CursorVisible();
+});}
 SGLError SGLGenericWindow::SetCursor(const wchar_t*) {return sglErrNotSupported;}
 SGLError SGLGenericWindow::MoveCursorPosition(int32_t x, int32_t y, int mouse) {
     if (mouse != 0) return sglErrNotSupported;
@@ -405,7 +430,9 @@ SGLError SGLGenericWindow::MoveCursorPosition(int32_t x, int32_t y, int mouse) {
         int width = 0, height = 0;
         if (!SDL_GetWindowSize(state->window, &width, &height) || !m_sizePhysicalDisplay.w || !m_sizePhysicalDisplay.h)
             return sglErrFailed;
-        SDL_WarpMouseInWindow(state->window,
+        if (embeddedPresentation) HostRequest("runtime_cursor_warp", "x="+std::to_string(x)+"&y="+std::to_string(y)+
+            "&width="+std::to_string(m_sizeVirtual.w)+"&height="+std::to_string(m_sizeVirtual.h));
+        else SDL_WarpMouseInWindow(state->window,
             float(position.x * width / m_sizePhysicalDisplay.w), float(position.y * height / m_sizePhysicalDisplay.h));
         m_idPrimaryTouch = 0; m_vPrimaryTouch = position;
         return sglErrSuccess;
@@ -423,15 +450,23 @@ int SGLGenericWindow::GetMonitorFrequency() {
 }
 SGLError SGLGenericWindow::AttachMenu(SGLWindowMenu*) {return sglErrNotSupported;}
 SGLError SGLGenericWindow::CaptureMouse(int) {
-    return WindowMain(m_pMutexUI, [] {return SDL_CaptureMouse(true) ? sglErrSuccess : sglErrFailed;});
+    return WindowMain(m_pMutexUI, [] {return embeddedPresentation || SDL_CaptureMouse(true) ? sglErrSuccess : sglErrFailed;});
 }
 SGLError SGLGenericWindow::ReleaseMouse(int) {
-    return WindowMain(m_pMutexUI, [] {return SDL_CaptureMouse(false) ? sglErrSuccess : sglErrFailed;});
+    return WindowMain(m_pMutexUI, [] {return embeddedPresentation || SDL_CaptureMouse(false) ? sglErrSuccess : sglErrFailed;});
 }
 bool SGLGenericWindow::OnKeyDown(int key) {
     SSmartLock<SMutex> lock(m_pMutexUI);
     int64_t flags = 0;
-    const auto mods = SDL_GetModState();
+    auto mods = SDL_GetModState();
+    if (embeddedPresentation) {
+        mods = SDL_KMOD_NONE;
+        if (const auto* state=StateFor(this)) {
+            if (state->pressedKeys.count(0x10)) mods=SDL_Keymod(mods|SDL_KMOD_SHIFT);
+            if (state->pressedKeys.count(0x11)) mods=SDL_Keymod(mods|SDL_KMOD_CTRL);
+            if (state->pressedKeys.count(0x12)) mods=SDL_Keymod(mods|SDL_KMOD_ALT);
+        }
+    }
     if (mods & SDL_KMOD_SHIFT) flags |= vkeyContextShift;
     if (mods & SDL_KMOD_CTRL) flags |= vkeyContextControl;
     if (mods & SDL_KMOD_ALT) flags |= vkeyContextMenu;
@@ -441,7 +476,15 @@ bool SGLGenericWindow::OnKeyDown(int key) {
 bool SGLGenericWindow::OnKeyUp(int key) {
     SSmartLock<SMutex> lock(m_pMutexUI);
     int64_t flags = 0;
-    const auto mods = SDL_GetModState();
+    auto mods = SDL_GetModState();
+    if (embeddedPresentation) {
+        mods = SDL_KMOD_NONE;
+        if (const auto* state=StateFor(this)) {
+            if (state->pressedKeys.count(0x10)) mods=SDL_Keymod(mods|SDL_KMOD_SHIFT);
+            if (state->pressedKeys.count(0x11)) mods=SDL_Keymod(mods|SDL_KMOD_CTRL);
+            if (state->pressedKeys.count(0x12)) mods=SDL_Keymod(mods|SDL_KMOD_ALT);
+        }
+    }
     if (mods & SDL_KMOD_SHIFT) flags |= vkeyContextShift;
     if (mods & SDL_KMOD_CTRL) flags |= vkeyContextControl;
     if (mods & SDL_KMOD_ALT) flags |= vkeyContextMenu;
@@ -560,17 +603,34 @@ void SGLGenericWindow::DrawSDLFrame() {
     if (SDL_GL_MakeCurrent(state->window, state->context)) {
         OnTimer();
         if (!StateFor(this) || !m_flagCreated || state->closing) return;
-        if (!study::platform::sdl::IsWindowPresentable(state->window)) return;
+        if (!embeddedPresentation && !study::platform::sdl::IsWindowPresentable(state->window)) return;
         const bool drawn = windowDrawHandler ? windowDrawHandler(this) : (OnDraw(), true);
         if (drawn && StateFor(this) && m_flagCreated && !state->closing &&
-                study::platform::sdl::IsWindowPresentable(state->window)) {
+                (embeddedPresentation || study::platform::sdl::IsWindowPresentable(state->window))) {
             if (frameObserver) frameObserver(state->window, frameObserverUser);
-            if (!study::platform::sdl::PresentWindow(state->window)) Trace("SDL frame present: %s\n", SDL_GetError());
+            if (!embeddedPresentation && !study::platform::sdl::PresentWindow(state->window)) Trace("SDL frame present: %s\n", SDL_GetError());
         }
     }
 }
 
 namespace study::platform::sdl {
+void SetEmbeddedPresentation(bool embedded) { embeddedPresentation = embedded; }
+void SetEmbeddedPlatformRequest(void (*request)(void*, const char*, const char*), void* user) {
+    embeddedRequest=request;embeddedRequestUser=user;
+}
+bool HostTextInputActive() {
+    for (const auto& entry : sdlWindows)
+        if (embeddedPresentation ? entry.second->textInput : SDL_TextInputActive(entry.second->window)) return true;
+    return false;
+}
+bool DispatchHostEvent(SDL_Event event) {
+    if (sdlWindows.empty()) return false;
+    auto* window = sdlWindows.begin()->first;
+    const auto* state = StateFor(window);
+    event.window.windowID = SDL_GetWindowID(state->window);
+    window->OnSDLEvent(event);
+    return true;
+}
 void SetWindowDrawHandler(bool (*handler)(SakuraGL::SGLGenericWindow*)) { windowDrawHandler = handler; }
 void CollectRetiredWindows() {
     retiredWindows.erase(std::remove_if(retiredWindows.begin(), retiredWindows.end(),

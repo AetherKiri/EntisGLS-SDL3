@@ -134,6 +134,8 @@ for component in ("ESL", "GLS3", "erisalib", "EGL"):
             position = text.index("{", start) + 1
             text = text[:position] + "\npublic:\n using EObjArray<T>::Pop;\n using EObjArray<T>::Push;\n using EObjArray<T>::GetSize;\n" + text[position:]
         if source.name == "glscs_context.cpp":
+            text = text.replace("#include <gls.h>", '#include <gls.h>\n#if defined(STUDYSTEADY_PLATFORM_SDL3)\n#include "platform/sdl/runtime_control.h"\n#endif')
+            text = text.replace("ESLError ECSContext::ExecuteInstruction( void )\n{", "ESLError ECSContext::ExecuteInstruction( void )\n{\n#if defined(STUDYSTEADY_PLATFORM_SDL3)\n    study::platform::sdl::WaitForRuntimeResume();\n#endif")
             text = text.replace("#include <gls.h>", '#include <gls.h>\n#include "runtime_support.h"')
             text = re.sub(r'ERawFile \*\s*pfile = new ERawFile ;\s*if \( pfile->Open\( strFileName, nOpenFlags \) \)\s*\{\s*delete\s+pfile ;\s*return\s+NULL ;\s*\}\s*return\s+pfile ;',
                           'auto *file = SSystem::SFileOpener::DefaultNewOpenFile(pwszFileName, nOpenFlags);\n return file ? new LegacyFileAdapter(file, nOpenFlags) : nullptr;', text, count=1)
