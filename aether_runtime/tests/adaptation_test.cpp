@@ -14,6 +14,11 @@
 #include <atomic>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
+#include <sakuraglx/sakuraglx.h>
+#include <sakuraglx/render/sglx3d_scene_item.h>
+#include <sakuraglx/render/sglx3d_scene_instancing.h>
+#include <sakuraglx/render/sglx3d_scene_item_curve.h>
 #include <filesystem>
 #include <future>
 #include <fstream>
@@ -285,7 +290,42 @@ public:
     }
 };
 
+template<class Parse>
+void sceneBinaryRecord(uint32_t type, size_t offset, size_t entrySize, Parse parse) {
+    using namespace SSystem;
+    using Header=SakuraGL::S3DSceneComposer::BinaryHeader;
+    const uint32_t count=2;
+    std::vector<uint8_t> bytes(sizeof(Header)+offset+count*entrySize,0);
+    Header header{};header.nType=type;
+    std::memcpy(bytes.data(),&header,sizeof(header));
+    std::memcpy(bytes.data()+sizeof(Header),&count,sizeof(count));
+    SString encoded;SArray<uint8_t> decoded;
+    const auto decode=[&] {
+        Charset::EncodeBase64(encoded,bytes.data(),bytes.size());
+        return parse(decoded,encoded);
+    };
+    const auto* valid=decode();
+    require(valid&&valid->count==count,"scene binary accepts two complete records");
+    bytes.pop_back();require(!decode(),"scene binary rejects a truncated final record");
+    bytes.push_back(0);
+    const uint32_t oversized=UINT32_MAX;
+    std::memcpy(bytes.data()+sizeof(Header),&oversized,sizeof(oversized));
+    require(!decode(),"scene binary rejects an oversized count without overflow");
+}
+void sceneBinary() {
+    using namespace SakuraGL;
+    sceneBinaryRecord(S3DSceneComposer::binaryInstancing,
+        offsetof(S3DSceneComposer::BinaryInstancingData,entries),
+        sizeof(S3DSceneComposer::BinaryInstancingEntry),
+        [](SSystem::SArray<uint8_t>& bytes,const wchar_t* text){return S3DItemInstancingSerializer::ParseData(bytes,text);});
+    sceneBinaryRecord(S3DSceneComposer::binaryBezierCurve,
+        offsetof(S3DSceneComposer::BinaryBezierCurveData,points),
+        sizeof(S3DSceneComposer::BinaryBezierCurvePoint),
+        [](SSystem::SArray<uint8_t>& bytes,const wchar_t* text){return S3DItemBezierCurveSerializer::ParseData(bytes,text);});
+}
+
 void serialization() {
+    sceneBinary();
     ECSEnvironment environment;require(!environment.InitEnvironment(),"serialization environment");
     StateImage image;image.AttachCSEnvironment(&environment);ECSContext context;
     require(!context.InitializeContext(&image),"serialization context");

@@ -79,7 +79,7 @@ ESLError ECSThread::Load(ESLFileObject& file,ECSContext& context) {
         }
         ClearThreadStorage(m_context,m_refThreadProc,context);
     };
-    struct Incomplete {decltype(reset)& reset;bool complete=false;~Incomplete(){if(!complete)reset();}} incomplete{reset};
+    struct Incomplete {decltype(reset)& cleanup;bool complete=false;~Incomplete(){if(!complete)cleanup();}} incomplete{reset};
     try {
         CheckedThreadFile checked(file);uint8_t header[12];
         checked.Read(header,sizeof(header));if(checked.failed)return eslErrGeneral;

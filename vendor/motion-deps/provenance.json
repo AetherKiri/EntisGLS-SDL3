@@ -1511,5 +1511,5 @@
   },
   "source_repository": "/Users/fenghengzhi/Developer/kirikiroid2-web",
   "source_commit": "13dda190f8370d02b6cf59286a088529b355658c",
-  "note": "Selected working-tree sources are unchanged. All platform adaptations are generated outside vendor. Boost files are the union of actual host and Android compiler dependencies."
+  "note": "Selected working-tree sources are unchanged except where an adaptation is recorded per file. Boost files cover host, Android and GNU/Linux compiler dependencies."
 }

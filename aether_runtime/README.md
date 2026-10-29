@@ -58,7 +58,7 @@ ctest --test-dir out/aether --output-on-failure --no-tests=error
 ```
 
 The host path supplies only the public ABI headers in `abi/include`. Dependencies
-are CMake, a C++17 compiler, Python 3, Bison 3.8.2+, FreeType and nlohmann-json,
+are CMake, a C++17 compiler, Python 3, Bison 3.8.2+, FreeType, nlohmann-json and
 Oniguruma, plus the platform's OpenGL/SDL development dependencies. Oniguruma
 is located through its CMake package (vcpkg) or pkg-config (Homebrew/Linux).
 With Homebrew, use `-DCMAKE_PREFIX_PATH="$(brew --prefix)"` and
@@ -68,8 +68,8 @@ installed packages can also be supplied normally.
 The 23 CTest groups need no commercial game. They cover provider lifetimes,
 discovery and configuration decoding, text/font restoration, input, sprite
 hotspots and image replacement, camera invalidation, pause and audio, object
-graph serialization, save directories, atomic save failure recovery and platform
-I/O. Game-local storage tests read existing saves, write through both URL
+graph serialization, bounded scene records, save directories, atomic save failure
+recovery and platform I/O. Game-local storage tests read existing saves, write through both URL
 schemes, reopen the SDK, switch games and change cache directories. Tests include
 Unicode game paths. The default build includes all registered test executables;
 `AETHERKIRI_BUILD_ENTISGLS_TESTS=OFF` excludes them from product-only builds.

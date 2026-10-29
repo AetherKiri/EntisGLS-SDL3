@@ -1,5 +1,6 @@
 #include "runtime/cotopha_port/legacy_file.h"
 #include <algorithm>
+#include <climits>
 #include <cstring>
 #include <limits>
 

@@ -1,4 +1,5 @@
 #pragma once
+#include <climits>
 #include <windows.h>
 #include <eritypes.h>
 #include <esl.h>

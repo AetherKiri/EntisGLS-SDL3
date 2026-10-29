@@ -98,10 +98,10 @@ S3DSceneComposer::BinaryBezierCurveData *
 			(const S3DSceneComposer::BinaryBezierCurveData*)
 				(pBinary + sizeof(S3DSceneComposer::BinaryHeader)) ;
 	size_t	nCount = pBinBezier->count ;
-	size_t	nDataBytes =
-		offsetof(S3DSceneComposer::BinaryBezierCurveData,points[nCount]) ;
-	if ( sizeof(S3DSceneComposer::BinaryHeader)
-						+ nDataBytes > aBinary.GetLength() )
+	const size_t nHeaderBytes = sizeof(S3DSceneComposer::BinaryHeader)
+		+ offsetof(S3DSceneComposer::BinaryBezierCurveData, points) ;
+	if ( nCount > (aBinary.GetLength() - nHeaderBytes)
+				/ sizeof(pBinBezier->points[0]) )
 	{
 		return	nullptr ;
 	}

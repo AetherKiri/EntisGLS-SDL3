@@ -635,10 +635,10 @@ S3DSceneComposer::BinaryInstancingData *
 			(const S3DSceneComposer::BinaryInstancingData*)
 				(pBinary + sizeof(S3DSceneComposer::BinaryHeader)) ;
 	size_t	nCount = pBinInstancing->count ;
-	size_t	nDataBytes =
-		offsetof(S3DSceneComposer::BinaryInstancingData,entries[nCount]) ;
-	if ( sizeof(S3DSceneComposer::BinaryHeader)
-						+ nDataBytes > aBinary.GetLength() )
+	const size_t nHeaderBytes = sizeof(S3DSceneComposer::BinaryHeader)
+		+ offsetof(S3DSceneComposer::BinaryInstancingData, entries) ;
+	if ( nCount > (aBinary.GetLength() - nHeaderBytes)
+				/ sizeof(pBinInstancing->entries[0]) )
 	{
 		return	NULL ;
 	}
