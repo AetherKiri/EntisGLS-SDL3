@@ -2,6 +2,8 @@
 #ifndef	__LOQUATY_ARRAY_BUFFER_H__
 #define	__LOQUATY_ARRAY_BUFFER_H__	1
 
+#include <cstring>
+
 namespace	Loquaty
 {
 	//////////////////////////////////////////////////////////////////////////
