@@ -63,6 +63,13 @@ def main():
          .replace('#error no implement SGLSoundRecorder::Open',
                   'return sglErrNotSupported; // Recording is not part of this backend.'))
     def font(s):
+        style = 'SGLError SGLFont::SetStyle( const SGLFontStyle& style )\n{'
+        if s.count(style) != 1: raise ValueError('SDK font style entry changed')
+        s = '#include "platform/sdl/system.h"\n' + s.replace(style, '''SGLError SGLFont::SetStyle( const SGLFontStyle& requested )
+{
+    SGLFontStyle style(requested);
+    const auto selected = study::platform::sdl::FontOverride();
+    if (!selected.empty()) style.pszFace = selected.c_str();''')
         constructor = 'SGLFont::SGLFont( void )\n{\n\tm_pFont = NULL ;\n}'
         if s.count(constructor) != 1: raise ValueError('SDK default font constructor changed')
         s = s.replace(constructor, 'SGLFont::SGLFont( void )\n{\n\tm_pFont = NULL ;\n\tm_flagOwner = false ;\n}')

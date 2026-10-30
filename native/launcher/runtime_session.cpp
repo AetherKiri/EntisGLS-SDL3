@@ -30,6 +30,7 @@
 #if defined(STUDYSTEADY_PLATFORM_SDL3)
 #include "platform/sdl/game_font_aliases.h"
 #include "platform/sdl/opentype_font.h"
+#include "platform/sdl/system.h"
 #include "launcher/game_config.h"
 #include "compatibility/games/compatibility_profiles.h"
 #include "runtime/cotopha_port/legacy_file.h"
@@ -66,10 +67,18 @@ std::wstring Wide(const std::string& text) {
 
 struct RuntimeScope {
     RuntimeScope() {
+#if defined(STUDYSTEADY_PLATFORM_SDL3)
+        study::platform::sdl::SetFontOverride({});
+#endif
         ECotophaScript::Initialize(0);
         ECotophaScript::MultithreadReference(true);
     }
-    ~RuntimeScope() { ECotophaScript::Release(); }
+    ~RuntimeScope() {
+        ECotophaScript::Release();
+#if defined(STUDYSTEADY_PLATFORM_SDL3)
+        study::platform::sdl::SetFontOverride({});
+#endif
+    }
 };
 
 void LogError(const char *stage, ESLError error, const ECSContext *context = nullptr) {
@@ -102,6 +111,7 @@ int RunLegacyGame(const wchar_t *arguments, const entis::launcher::GameLaunchCon
     study::platform::LogWrite(study::platform::LogPriority::Info, "EntisGLS", "Starting traditional Cotopha runtime");
 #if defined(STUDYSTEADY_PLATFORM_SDL3)
     if (!launch) return Fail(1, "Missing resolved game configuration");
+    environment.SetResourceOverrides(launch->resourceOverrides);
     if (!study::launcher::ConfigureCompatibility(launch->compatibilityProfile))
         return Fail(1, "Unknown compatibility profile: " + launch->compatibilityProfile);
     if (arguments && *arguments && launch->compatibilityProfile != "study-steady-r18")
@@ -110,23 +120,30 @@ int RunLegacyGame(const wchar_t *arguments, const entis::launcher::GameLaunchCon
     config.AttachMemory(const_cast<char*>(launch->normalizedXml.data()), launch->normalizedXml.size());
     if (environment.LoadEnvironment(config)) return Fail(1, "Could not load game environment: " + launch->configSource);
     using namespace study::platform::sdl;
-    for (const auto& font : launch->openTypeFonts) {
-        const auto registered = RegisterOpenTypeFont(Wide(font.path), {},
-            [&](const wchar_t* path) { return environment.NewOpenFile(path, SSystem::SFileOpener::shareRead); }, Wide(font.family));
-        if (!registered.loaded) return Fail(38, "Cannot load font " + font.path + ": " + registered.error);
+    if (!launch->fontOverride.empty()) {
+        const auto registered = RegisterOpenTypeFont(Wide(launch->fontOverride), {},
+            [&](const wchar_t* path) { return environment.NewOpenFile(path, SSystem::SFileOpener::shareRead); }, L"@aether:lua");
+        if (!registered.loaded) return Fail(38, "Cannot load aether.lua font " + launch->fontOverride + ": " + registered.error);
+        SetFontOverride(registered.registeredName);
+    } else {
+        for (const auto& font : launch->openTypeFonts) {
+            const auto registered = RegisterOpenTypeFont(Wide(font.path), {},
+                [&](const wchar_t* path) { return environment.NewOpenFile(path, SSystem::SFileOpener::shareRead); }, Wide(font.family));
+            if (!registered.loaded) return Fail(38, "Cannot load font " + font.path + ": " + registered.error);
+        }
+        for (const auto& path : launch->bundledFonts) {
+            // A private stock name preserves each face, while the first registered
+            // family (including explicit XML fonts) remains authoritative.
+            RegisterOpenTypeFont(Wide(path), {},
+                [&](const wchar_t* name) { return environment.NewOpenFile(name, SSystem::SFileOpener::shareRead); },
+                Wide("@bundled:" + path));
+        }
+        for (const auto& alias : launch->fontAliases)
+            if (!RegisterFontAlias(Wide(alias.alias), Wide(alias.source)))
+                return Fail(37, "Cannot register font alias " + alias.alias + " -> " + alias.source);
+        if (!study::launcher::ApplyCompatibilityFonts(launch->compatibilityProfile))
+            return Fail(37, "Compatibility font setup failed: " + launch->compatibilityProfile);
     }
-    for (const auto& path : launch->bundledFonts) {
-        // A private stock name preserves each face, while the first registered
-        // family (including explicit XML fonts) remains authoritative.
-        RegisterOpenTypeFont(Wide(path), {},
-            [&](const wchar_t* name) { return environment.NewOpenFile(name, SSystem::SFileOpener::shareRead); },
-            Wide("@bundled:" + path));
-    }
-    for (const auto& alias : launch->fontAliases)
-        if (!RegisterFontAlias(Wide(alias.alias), Wide(alias.source)))
-            return Fail(37, "Cannot register font alias " + alias.alias + " -> " + alias.source);
-    if (!study::launcher::ApplyCompatibilityFonts(launch->compatibilityProfile))
-        return Fail(37, "Compatibility font setup failed: " + launch->compatibilityProfile);
 #else
     SSystem::SString external, local;
     if (SSystem::SFile::GetDefaultDirectory(external, SSystem::SFile::DefaultDirectory::AndroidExternalStoragePrivate) ||

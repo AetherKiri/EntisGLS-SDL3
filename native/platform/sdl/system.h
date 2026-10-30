@@ -38,6 +38,11 @@ void ReleaseSystemPaths();
 void InstallStdoutLogging();
 void SetDialogParent(SDL_Window* window);
 
+// An explicit session font takes precedence over script-requested families.
+// An empty name restores native selection. The caller registers the stock face.
+void SetFontOverride(const std::wstring& family);
+std::wstring FontOverride();
+
 // SDL lacks an API for resolving statically linked symbols in the current
 // executable. The application can supply its native-registration resolver.
 using SymbolResolver = void* (*)(const char* symbol, void* userdata);

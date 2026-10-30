@@ -78,6 +78,45 @@ int main(int argc,char** argv){
         std::ifstream existing(fixture/"savedata/existing.dat");std::string contents;existing >> contents;
         require(contents=="preserved","repeated provider starts preserve existing saves");
         require(!fs::exists(root/"user/entisgls"),"provider does not create an alternate save tree");
+        const auto hooked = root / "hooked-game";
+        fs::create_directories(hooked);
+        fs::copy_file(fixture / "adventure.csx", hooked / "translated.csx", fs::copy_options::overwrite_existing);
+        fs::copy_file(fixture / "cotopha.xml", hooked / "cotopha.xml", fs::copy_options::overwrite_existing);
+        std::ofstream(hooked / "adventure.csx") << "invalid original: must use the Lua resource";
+        std::ofstream(hooked / "aether.lua") << "assert(aether.engine == 'entisgls'); aether.add_file('adventure.csx', aether.read_file('translated.csx'))";
+        {
+            Runtime instance;
+            require(api.create(nullptr,&host,&desc,&instance.value)==ENGINE_RESULT_OK,"Lua provider create");
+            require(api.open_game(instance.value,hooked.c_str(),nullptr)==ENGINE_RESULT_OK,"Lua provider open");
+            waitFinished(instance.value);
+        }
+        std::ofstream(hooked / "invalid.ttf") << "not a font";
+        std::ofstream(hooked / "aether.lua", std::ios::app) << "; aether.set_font('invalid.ttf')";
+        {
+            Runtime instance;
+            require(api.create(nullptr,&host,&desc,&instance.value)==ENGINE_RESULT_OK,"font provider create");
+            require(api.open_game(instance.value,hooked.c_str(),nullptr)==ENGINE_RESULT_OK,"font selection reaches deferred startup");
+            bool failed = false;
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            while(std::chrono::steady_clock::now() < deadline) {
+                if(api.tick(instance.value,16) != ENGINE_RESULT_OK) { failed = true; break; }
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            require(failed && std::string(api.get_last_error(instance.value)).find("aether.lua font") != std::string::npos,
+                    "selected physical font is loaded and invalid content is reported");
+        }
+        std::ofstream(hooked / "aether.lua") << "aether.add_file('partial', 'x'); error('fixture failure')";
+        require(api.probe(nullptr,hooked.c_str())>=90,"probe does not run aether.lua");
+        {
+            Runtime instance;
+            require(api.create(nullptr,&host,&desc,&instance.value)==ENGINE_RESULT_OK,"invalid Lua provider create");
+            require(api.open_game(instance.value,hooked.c_str(),nullptr)!=ENGINE_RESULT_OK,"invalid Lua stops startup");
+            require(std::string(api.get_last_error(instance.value)).find("aether.lua")!=std::string::npos,"Lua startup error identifies script");
+            fs::remove(hooked / "aether.lua");
+            fs::copy_file(hooked / "translated.csx", hooked / "adventure.csx", fs::copy_options::overwrite_existing);
+            require(api.open_game(instance.value,hooked.c_str(),nullptr)==ENGINE_RESULT_OK,"failed startup can retry without Lua");
+            waitFinished(instance.value);
+        }
         std::printf("EntisGLS provider lifecycle PASS (%u checks)\n",checks);return 0;
     }catch(const std::exception& error){std::fprintf(stderr,"Provider FAIL: %s\n",error.what());return 1;}
 }

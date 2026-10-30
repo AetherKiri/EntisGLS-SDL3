@@ -1,6 +1,8 @@
 #include "input.h"
 #include "font_discovery.h"
+#include "game_hooks.h"
 #include "compatibility/sdk/legacy/gls.h"
+#include <sakuragl/erisa/sgl_erisa_archive_file.h>
 #include "launcher/config_encoding.h"
 #include "launcher/game_config.h"
 #include "platform/sdl/system.h"
@@ -366,6 +368,127 @@ void fonts(const std::filesystem::path& root) {
     const auto found=aether::entisgls::DiscoverBundledFonts(root);
     require(found==std::vector<std::string>({"a.ttc","b.ttf",u8"setup/fonts/中文.OTF"}),"font scan is bounded, relative, deterministic, case-insensitive and ignores symlinks/empty/hidden files");
 }
+void gameHooks(const std::filesystem::path& root) {
+    namespace fs = std::filesystem;
+    using namespace SSystem;
+    auto wide = [](const std::string &text) { SString s; s.FromUTF8(reinterpret_cast<const uint8_t *>(text.c_str())); return s; };
+    fs::create_directories(root / "savedata");
+    std::ofstream(root / "savedata/slot.dat") << "progress";
+    std::ofstream(root / "font.ttf") << "font selection fixture";
+    {
+        const std::vector<std::pair<const wchar_t *, std::string>> members = {
+            {L"message.bin", "原生中文"}, {L"keep.bin", "original"}};
+        ERISA::SGLArchiveFile::SDirectory directory;
+        ERISA::SGLArchiveFile::FILE_ENTRY_EX entry{};
+        entry.nEncodeType = ERISA::SGLArchiveFile::encodeRaw;
+        for (const auto &member : members) directory.AddFileEntry(member.first, entry);
+        ERISA::SGLArchiveFile::SDirectory graphics;
+        graphics.AddFileEntry(L"base.eri", entry);
+        entry.nAttribute = ERISA::SGLArchiveFile::attrDirectory;
+        directory.AddFileEntry(L"gfx", entry);
+        SStandardFileOpener files;
+        std::unique_ptr<SFileInterface> file(files.NewOpenFile(wide((root / "fixture.noa").u8string()), SFile::modeCreate));
+        ERISA::SGLArchiveFile archive;
+        require(file && archive.OpenArchive(file.get(), false, SFile::modeCreate, &directory) == errSuccess, "synthetic NOA create");
+        for (const auto &member : members) {
+            require(archive.DescendFile(member.first) == errSuccess, "NOA member create");
+            require(archive.Write(member.second.data(), member.second.size()) == member.second.size(), "NOA member write");
+            require(archive.AscendFile() == errSuccess, "NOA member close");
+        }
+        require(archive.DescendDirectory(L"gfx", &graphics) == errSuccess, "NOA subdirectory create");
+        require(archive.DescendFile(L"base.eri") == errSuccess, "NOA reference create");
+        require(archive.Write("reference", 9) == 9 && archive.AscendFile() == errSuccess, "NOA reference write");
+        require(archive.AscendDirectory() == errSuccess, "NOA subdirectory close");
+        require(archive.CloseArchive() == errSuccess, "NOA close");
+    }
+    ECSEnvironment environment;
+    require(environment.InitEnvironment() == errSuccess, "hook environment initialize");
+    require(environment.AddFileArchive(wide((root / "fixture.noa").u8string()), "") == eslErrSuccess, "native archive mounted");
+    environment.SetWritableFileOpener(new SOffsetFileOpener(wide((root / "savedata").u8string()), L'/', new SStandardFileOpener, true));
+    auto read = [&](const wchar_t *path) {
+        std::unique_ptr<SFileInterface> file(environment.NewOpenFile(path, SFile::shareRead));
+        require(bool(file), "environment resource opens");
+        std::string value(static_cast<size_t>(file->GetLength()), '\0');
+        require(file->Read(value.data(), value.size()) == value.size(), "environment resource bytes");
+        return value;
+    };
+    require(read(L"message.bin") == "原生中文", "native translation works without Lua");
+    require(read(L"gfx/base.eri") == "reference", "native archive reference is readable before overrides");
+    std::ofstream(root / "aether.lua") << R"(
+        assert(aether.engine == 'entisgls' and aether.api_version == 1)
+        aether.add_file('MESSAGE.BIN', '兜底中文')
+        aether.add_file('empty.bin', '')
+        aether.add_file('gfx/replacement.eri', 'image')
+        aether.add_file('slot.dat', 'must not replace saves')
+        aether.add_file('savedata/slot.dat', 'must not replace saves')
+        aether.set_font('font.ttf')
+    )";
+    auto hooks = std::make_shared<aether::hooks::GameHooks>();
+    hooks->Load(root, "entisgls");
+    entis::launcher::GameLaunchConfig config;
+    config.openTypeFonts.push_back({"original.ttf", "Default"});
+    aether::entisgls::ApplyGameHooks(root, root / "cache", hooks, config);
+    require(config.fontOverride == "storage://game/font.ttf", "selected physical font reaches the session configuration");
+    {
+        using namespace SakuraGL;
+        class FixtureFont final : public SGLFontObject {
+        public:
+            SGLFontObject *NewFont(const SGLFontStyle &style) override {
+                require(std::wstring(style.pszFace) == L"@test:lua", "selected font wins over the script's requested family");
+                require(style.nSize == 24, "font override retains the requested style");
+                return new FixtureFont;
+            }
+            SGLError SetStyle(const SGLFontStyle &) override { return sglErrSuccess; }
+            SGLError GetMetrics(uint8_t *, size_t, SGLFontMetrics &metrics, uint32_t) override {
+                metrics.nWidth = 7;
+                return sglErrSuccess;
+            }
+        };
+        SGLFont::RegisterStockFont(L"@test:lua", new FixtureFont);
+        study::platform::sdl::SetFontOverride(L"@test:lua");
+        SGLFont font; SGLFontStyle style; style.pszFace = L"Uninstalled game font"; style.nSize = 24;
+        require(font.SetStyle(style) == sglErrSuccess, "font rendering uses explicit session selection");
+        SGLFontMetrics metrics{};
+        require(font.GetMetrics(nullptr, 0, metrics, 0x4e2d) == sglErrSuccess && metrics.nWidth == 7, "glyph queries reach the selected font");
+        study::platform::sdl::SetFontOverride({});
+        require(font.SetStyle(style) != sglErrSuccess, "clearing font selection restores native lookup");
+    }
+    const auto cache = hooks->CacheDirectory(root / "cache");
+    environment.SetResourceOverrides(config.resourceOverrides);
+    require(read(L"message.bin") == "兜底中文" && read(L"storage://game/message.bin") == "兜底中文", "Lua wins over archive through logical and game URLs");
+    require(read(L"keep.bin") == "original", "unregistered archive resource retained");
+    require(environment.IsExistingFile(L"empty.bin") && read(L"empty.bin").empty(), "zero-length resource is present");
+    SFileOpener::State state{};
+    require(environment.QueryFileState(L"message.bin", state) == errSuccess && state.nFileSize == std::string("兜底中文").size(), "metadata sees overridden bytes");
+    {
+        std::unique_ptr<ESLFileObject> file(environment.OpenFileObject("message.bin"));
+        require(file && file->GetLength() == state.nFileSize, "traditional File API shares the override");
+        std::unique_ptr<SFileInterface> image(environment.NewOpenFile(L"gfx/replacement.eri", SFile::shareRead));
+        std::unique_ptr<SFileInterface> duplicate(image->Duplicate());
+        std::unique_ptr<SFileInterface> reference(duplicate->NewOpenFile(L"base.eri", SFile::shareRead));
+        require(reference && reference->GetLength() == 9, "duplicated override streams resolve reference assets in native archives");
+        reference.reset(duplicate->NewOpenFile(L"gfx/base.eri", SFile::shareRead));
+        require(reference && reference->GetLength() == 9, "archive-root relative references keep their original meaning");
+        image.reset(environment.NewOpenFile(L"storage://game/gfx/replacement.eri", SFile::shareRead));
+        reference.reset(image->NewOpenFile(L"base.eri", SFile::shareRead));
+        require(reference && reference->GetLength() == 9, "game URL replacements retain archive references");
+    }
+    require(read(L"slot.dat") == "progress", "unqualified existing saves retain native precedence");
+    require(environment.QueryFileState(L"slot.dat", state) == errSuccess && state.nFileSize == 8, "save metadata matches the native bytes");
+    require(!config.resourceOverrides->NewOpenFile(L"message.bin", SFile::modeCreate), "override opener rejects writes");
+    require(!config.resourceOverrides->IsExisting(L"savedata/slot.dat"), "explicit saves excluded from overrides");
+    environment.SetResourceOverrides(nullptr); config.resourceOverrides.reset(); hooks.reset();
+    require(!fs::exists(cache), "resource cache removed at session teardown");
+    fs::remove(root / "aether.lua");
+    require(read(L"message.bin") == "原生中文", "native translation restored after hook removal");
+    std::ofstream(root / "aether.lua") << "aether.set_encoding('GBK')";
+    hooks = std::make_shared<aether::hooks::GameHooks>(); hooks->Load(root, "entisgls");
+    bool rejected = false;
+    try { aether::entisgls::ApplyGameHooks(root, root / "cache", hooks, config); }
+    catch (const std::runtime_error &e) { rejected = std::string(e.what()).find("aether.lua") != std::string::npos; }
+    require(rejected, "unsupported CSX encoding is reported, not silently ignored");
+    fs::remove(root / "aether.lua");
+}
 void control() {
     auto* mutex=ECSSakura2Processor::mutexGlobalAtomic;
     auto* signal=ECSSakura2Processor::signalLeave;
@@ -411,7 +534,7 @@ int main(int argc,char** argv) {
         study::platform::sdl::SystemPaths paths;paths.assetsRoot=paths.storageRoot=paths.localRoot=paths.gameRoot=root.string();
         require(study::platform::sdl::ConfigureSystemPaths(paths),"fixture paths");SakuraGL::Initialize();ECotophaScript::Initialize(0);ECotophaScript::MultithreadReference(true);initialized=true;
         const std::string mode=argv[1];
-        if(mode=="encoding")encoding();else if(mode=="input")input();else if(mode=="graphics")graphics();else if(mode=="image-cache")imageCache();else if(mode=="camera-cache")cameraCache();else if(mode=="control")control();else if(mode=="audio")audio();else if(mode=="fonts")fonts(root);else if(mode=="serialization")serialization();else throw std::runtime_error("unknown test mode");
+        if(mode=="game-hooks")gameHooks(root);else if(mode=="encoding")encoding();else if(mode=="input")input();else if(mode=="graphics")graphics();else if(mode=="image-cache")imageCache();else if(mode=="camera-cache")cameraCache();else if(mode=="control")control();else if(mode=="audio")audio();else if(mode=="fonts")fonts(root);else if(mode=="serialization")serialization();else throw std::runtime_error("unknown test mode");
         std::printf("EntisGLS %s PASS (%u checks)\n",argv[1],checks);
     }catch(const std::exception& error){std::fprintf(stderr,"EntisGLS adaptation FAIL: %s\n",error.what());result=1;}
     study::platform::sdl::ResumeRuntimeForShutdown();

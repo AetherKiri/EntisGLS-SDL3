@@ -3,9 +3,12 @@
 #include <filesystem>
 #include <cstdint>
 #include <optional>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+namespace SSystem { class SFileOpener; }
 
 namespace entis::launcher {
 
@@ -20,6 +23,9 @@ struct FontAlias {
 };
 
 struct GameLaunchConfig {
+    // Optional host-owned, read-only resource layer. Never used for saves.
+    std::shared_ptr<SSystem::SFileOpener> resourceOverrides;
+    std::string fontOverride;
     std::string normalizedXml;
     std::string entryScript;
     std::string title;
