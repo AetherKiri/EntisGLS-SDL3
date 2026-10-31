@@ -1782,7 +1782,7 @@ ESLError ECSFile::Call_GetFileTime
     if (env && !m_strFileName.m_varStr.IsEmpty()) {
         auto* writable = env->GetWritableFileOpener();
         if (writable) result = writable->QueryState(m_strFileName.m_varStr, state);
-        if (result) result = env->SSystem::SEnvironment::QueryFileState(m_strFileName.m_varStr, state);
+        if (result) result = env->QueryFileState(m_strFileName.m_varStr, state);
     }
     if (result) return context.PushObject(context.new_CSInteger(eslErrGeneral));
     const SSystem::DATE_TIME* times[] = { &state.dtCreated, &state.dtAccessed, &state.dtModified };

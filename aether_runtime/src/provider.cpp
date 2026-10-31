@@ -1,6 +1,7 @@
 #include "entisgls/provider.h"
 #include "input.h"
 #include "font_discovery.h"
+#include "game_hooks.h"
 #include "storage.h"
 #include "compatibility/sdk/legacy/gls.h"
 #include "launcher/game_config.h"
@@ -57,7 +58,8 @@ struct HostGraphicsScope {
 struct Player {
     engine_runtime_host_v1_t host{};
     entis::launcher::GameLaunchConfig config;
-    fs::path cache, root;
+    std::shared_ptr<hooks::GameHooks> gameHooks;
+    fs::path cacheBase, cache, root;
     std::string error, workerError, explicitConfig, debugSnapshot;
     std::thread worker;
     std::atomic<bool> finished{false};
@@ -188,7 +190,7 @@ engine_result_t create(void*, const engine_runtime_host_v1_t* host, const engine
     if (!desc->writable_path_utf8 || !*desc->writable_path_utf8 || !desc->cache_path_utf8 || !*desc->cache_path_utf8) return ENGINE_RESULT_INVALID_ARGUMENT;
     try {
         auto p = std::make_unique<Player>(); p->host = *host;
-        p->cache = fs::absolute(fs::u8path(desc->cache_path_utf8)) / "entisgls";
+        p->cacheBase = fs::absolute(fs::u8path(desc->cache_path_utf8)) / "entisgls";
         *out = p.release(); return ENGINE_RESULT_OK;
     } catch (...) { return ENGINE_RESULT_INTERNAL_ERROR; }
 }
@@ -196,12 +198,18 @@ engine_result_t open(void* opaque, const char* path, const char* startup) {
     if (!path || !*path) return ENGINE_RESULT_INVALID_ARGUMENT;
     return guard(opaque, [&](Player& p) {
         if (p.opened) throw std::runtime_error("Recreate the EntisGLS provider before opening another game");
+        p.config = {};
+        p.cache = p.cacheBase;
         p.root = fs::canonical(fs::u8path(path));
+        p.gameHooks = std::make_shared<hooks::GameHooks>();
+        p.gameHooks->Load(p.root, "entisgls");
         const auto selection = !p.explicitConfig.empty() ? p.explicitConfig : startup && *startup ? startup : "";
         p.config = entis::launcher::DiscoverGame(p.root, fs::u8path(selection));
         for (const auto& font : DiscoverBundledFonts(p.root))
             p.config.bundledFonts.push_back("storage://game/" + font);
         p.cache /= p.config.gameId;
+        ApplyGameHooks(p.root, p.cache, p.gameHooks, p.config);
+        for (const auto &message : p.gameHooks->Messages()) p.log(ENGINE_RUNTIME_LOG_INFO, message);
         // The host can request a frame before the asynchronous VM creates its
         // first window. Supply an opaque black frame until capture replaces it.
         p.pixels.assign(size_t(p.width) * p.height * 4, 0);

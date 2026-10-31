@@ -23,6 +23,8 @@ SystemPaths systemPaths;
 bool configured = false;
 bool inUse = false;
 std::mutex configurationMutex;
+std::mutex fontSelectionMutex;
+std::wstring selectedFont;
 std::atomic<SDL_Window*> dialogParent{nullptr};
 SymbolResolver symbolResolver = nullptr;
 void* symbolResolverData = nullptr;
@@ -320,6 +322,14 @@ void InstallStdoutLogging() {
         SDL_SetLogOutputFunction(StdoutLog, nullptr);
 }
 void SetDialogParent(SDL_Window* window) { dialogParent.store(window); }
+void SetFontOverride(const std::wstring& family) {
+    const std::lock_guard<std::mutex> lock(fontSelectionMutex);
+    selectedFont = family;
+}
+std::wstring FontOverride() {
+    const std::lock_guard<std::mutex> lock(fontSelectionMutex);
+    return selectedFont;
+}
 void SetSymbolResolver(SymbolResolver resolver, void* userdata) {
     const std::lock_guard<std::mutex> lock(configurationMutex);
     symbolResolver = resolver;

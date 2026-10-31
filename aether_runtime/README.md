@@ -40,6 +40,27 @@ under `<host cache>/entisgls/<game ID>`; changing the cache does not move or hid
 saved games. Earlier experimental builds used a host-data save tree. Those files
 are not automatically copied over existing game saves.
 
+## Game-local Lua hooks
+
+The provider runs a game-root `aether.lua` once before opening the session, using
+Aether's shared API v1 (`aether.engine == "entisgls"`). Register native CSX or
+resource bytes with `add_file`, or mount an extracted directory with `mount_dir`.
+Logical names override matching NOA members and loose game resources; unspecified
+resources retain native lookup. Missing scripts preserve native behavior and
+script errors stop startup. Detection does not run Lua.
+
+Overrides use a session-owned host cache. Relative image references resolve back
+through the game environment, and caches are removed when their session releases
+them. Save paths and native writes remain outside the override layer. `set_font`
+selects a physical game-local font for all script-requested families while
+retaining their size and style; session teardown clears the selection. CSX has
+its own Unicode representation: `set_encoding` is rejected explicitly, while
+`transcode` remains available for patch bytes. Launch configuration discovery
+still uses native files.
+
+See Aether's [English API reference](https://github.com/AetherKiri/Aether/blob/main/bridge/game_hooks/README.md)
+and [中文接口文档](https://github.com/AetherKiri/Aether/blob/main/bridge/game_hooks/README.zh-CN.md).
+
 ## Build and tests
 
 Inside Aether, the usual desktop build enables this provider independently of
@@ -57,19 +78,22 @@ cmake --build out/aether --parallel 3
 ctest --test-dir out/aether --output-on-failure --no-tests=error
 ```
 
-The host path supplies only the public ABI headers in `abi/include`. Dependencies
-are CMake, a C++17 compiler, Python 3, Bison 3.8.2+, FreeType, nlohmann-json and
-Oniguruma, plus the platform's OpenGL/SDL development dependencies. Oniguruma
+The host path supplies public ABI headers in `abi/include` and the shared
+`bridge/game_hooks` module. Dependencies are CMake, a C++17 compiler, Python 3,
+Bison 3.8.2+, FreeType, nlohmann-json, Oniguruma, Lua 5.4, Boost.Locale, zlib and
+zstd, plus the platform's OpenGL/SDL development dependencies. Oniguruma
 is located through its CMake package (vcpkg) or pkg-config (Homebrew/Linux).
-With Homebrew, use `-DCMAKE_PREFIX_PATH="$(brew --prefix)"` and
+With Homebrew's `lua@5.4`, use `-DCMAKE_PREFIX_PATH="$(brew --prefix);$(brew --prefix lua@5.4)"` and
 `-DTJS_BISON="$(brew --prefix bison)/bin/bison"`. Aether's vcpkg toolchain and
 installed packages can also be supplied normally.
 
-The 23 CTest groups need no commercial game. They cover provider lifetimes,
+The 24 CTest groups need no commercial game. They cover provider lifetimes,
 discovery and configuration decoding, text/font restoration, input, sprite
 hotspots and image replacement, camera invalidation, pause and audio, object
 graph serialization, bounded scene records, save directories, atomic save failure
-recovery and platform I/O. Game-local storage tests read existing saves, write through both URL
+recovery, Lua overrides and platform I/O. Lua tests execute a replaced CSX,
+check native/Lua coexistence, relative image references, failed-script retries
+and cache teardown. Game-local storage tests read existing saves, write through both URL
 schemes, reopen the SDK, switch games and change cache directories. Tests include
 Unicode game paths. The default build includes all registered test executables;
 `AETHERKIRI_BUILD_ENTISGLS_TESTS=OFF` excludes them from product-only builds.

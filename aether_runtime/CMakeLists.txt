@@ -12,6 +12,9 @@ if(NOT EXISTS "${AETHER_ENTISGLS_HOST_ROOT}/abi/include/engine_api.h")
 endif()
 
 option(AETHERKIRI_BUILD_ENTISGLS_TESTS "Build asset-free EntisGLS regression tests" ON)
+if(NOT TARGET aether_game_hooks)
+    add_subdirectory("${AETHER_ENTISGLS_HOST_ROOT}/bridge/game_hooks" "${CMAKE_CURRENT_BINARY_DIR}/game_hooks")
+endif()
 # The SDK is large; retain source-line crash diagnostics without duplicating
 # full vendor type information into every Debug object and archive.
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
@@ -28,7 +31,7 @@ get_filename_component(entis_vendor "${CMAKE_CURRENT_SOURCE_DIR}/.." REALPATH)
 add_subdirectory("${entis_vendor}" "${CMAKE_CURRENT_BINARY_DIR}/sdk")
 
 find_package(nlohmann_json CONFIG REQUIRED)
-add_library(aether_entisgls_runtime SHARED src/provider.cpp src/input.cpp src/font_discovery.cpp src/storage.cpp
+add_library(aether_entisgls_runtime SHARED src/provider.cpp src/input.cpp src/font_discovery.cpp src/storage.cpp src/game_hooks.cpp
     "${entis_vendor}/native/launcher/game_config.cpp"
     "${entis_vendor}/native/launcher/config_encoding.cpp"
     "${entis_vendor}/native/launcher/archive_launch_fallback.cpp"
@@ -42,7 +45,7 @@ target_compile_definitions(aether_entisgls_runtime PRIVATE AETHER_ENTISGLS_EXPOR
 target_include_directories(aether_entisgls_runtime PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include"
     "${AETHER_ENTISGLS_HOST_ROOT}/abi/include")
 target_link_libraries(aether_entisgls_runtime PRIVATE legacy_objects legacy_foundation gls4_sdl
-    motion_apk_runtime freetype nlohmann_json::nlohmann_json)
+    motion_apk_runtime freetype nlohmann_json::nlohmann_json aether_game_hooks)
 set_target_properties(aether_entisgls_runtime PROPERTIES CXX_VISIBILITY_PRESET hidden
     C_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
 if(APPLE)
@@ -63,7 +66,7 @@ if(AETHERKIRI_BUILD_ENTISGLS_TESTS)
     target_compile_features(aether_entisgls_provider_test PRIVATE cxx_std_17)
     target_link_libraries(aether_entisgls_provider_test PRIVATE aether_entisgls_runtime nlohmann_json::nlohmann_json)
     add_test(NAME entisgls-provider COMMAND aether_entisgls_provider_test "${CMAKE_CURRENT_BINARY_DIR}/csx-fixture" "${CMAKE_CURRENT_BINARY_DIR}/provider-fixture")
-    add_executable(aether_entisgls_adaptation_test EXCLUDE_FROM_ALL tests/adaptation_test.cpp src/input.cpp src/font_discovery.cpp
+    add_executable(aether_entisgls_adaptation_test EXCLUDE_FROM_ALL tests/adaptation_test.cpp src/input.cpp src/font_discovery.cpp src/game_hooks.cpp
         "${entis_vendor}/native/launcher/config_encoding.cpp"
         "${entis_vendor}/native/compatibility/games/compatibility_profiles.cpp"
         "${entis_vendor}/native/platform/sdl/game_font_aliases.cpp"
@@ -71,8 +74,8 @@ if(AETHERKIRI_BUILD_ENTISGLS_TESTS)
         "${CMAKE_CURRENT_BINARY_DIR}/sdk/legacy_heap_sdk/glscs_sakura2_obj_heap.cpp")
     target_compile_features(aether_entisgls_adaptation_test PRIVATE cxx_std_17)
     target_include_directories(aether_entisgls_adaptation_test PRIVATE src "${AETHER_ENTISGLS_HOST_ROOT}/abi/include")
-    target_link_libraries(aether_entisgls_adaptation_test PRIVATE legacy_objects legacy_foundation gls4_sdl motion_apk_runtime freetype)
-    foreach(mode encoding input graphics image-cache camera-cache control audio fonts serialization)
+    target_link_libraries(aether_entisgls_adaptation_test PRIVATE legacy_objects legacy_foundation gls4_sdl motion_apk_runtime freetype aether_game_hooks)
+    foreach(mode encoding input graphics image-cache camera-cache control audio fonts serialization game-hooks)
         add_test(NAME entisgls-${mode} COMMAND aether_entisgls_adaptation_test ${mode} "${CMAKE_CURRENT_BINARY_DIR}/adaptation-${mode}")
     endforeach()
     add_test(NAME entisgls-configuration COMMAND launcher_config_test "${CMAKE_CURRENT_BINARY_DIR}/config-fixtures")
