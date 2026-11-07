@@ -2,6 +2,7 @@
 #include "runtime/cotopha_port/legacy_window.h"
 #include "runtime/cotopha_port/legacy_window_draw.h"
 #include "runtime/cotopha_port/legacy_paint_gate.h"
+#include "runtime/cotopha_port/legacy_button_notification.h"
 #include <sakuraglx/sprite/sglx_sprite_button.h>
 #include "runtime/cotopha_port/legacy_input.h"
 #include <algorithm>
@@ -84,7 +85,7 @@ bool StudySteadyDrawWindow(SakuraGL::SGLGenericWindow* window) {
     return drawn;
 }
 
-class ECSWindow::WindowBridge final : public SakuraGL::SGLWindowSprite {
+class ECSWindow::WindowBridge final : public SakuraGL::SGLWindowSprite, public LegacyButtonCommandTarget {
     ECSWindow &owner_;
     struct MouseProxy final : SakuraGL::SGLMouseInterface {
         WindowBridge &bridge;
@@ -758,6 +759,11 @@ bool CheckLegacyWindowCommandQueue() {
     if(!check(!button.InvokeCommands(L"<status_notification parameter=\"1\"/>"),"actual native button status notification"))return false;
     window.NativeSprite().AddChild(&button);
     struct Detach {ECSWindow& window;SakuraGL::SGLSpriteButton& button;~Detach(){window.NativeSprite().DetachChild(&button);}} detach{window,button};
+    button.SetEnable(false);
+    if(!check(window.commands_.size()==1&&window.commands_.front().notification==4&&
+        window.commands_.front().parameter==1,
+        "buttons directly attached to a legacy Window report disabled, not active-pushed"))return false;
+    button.SetEnable(true);window.commands_.clear();
     constexpr auto touch=SakuraGL::SGLMouseInterface::TouchFlag;
     {
         PointerCommandScope dispatch(&window);
