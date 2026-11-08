@@ -538,13 +538,8 @@ GameLaunchConfig NormalizeGameConfig(const fs::path& gameDir, const std::string&
     // Native EntisGLS applications also use IDR_COTOMI environment documents,
     // legitimately without a script entry. A readable config is not proof that
     // the application can run in our traditional Cotopha interpreter.
-    if (declaredEntry.empty())
-        throw ConfigError("No Cotopha .csx entry script is declared in " + source +
-            " (missing or empty <" + script->GetTag() + " src>). "
-            "This launcher requires a CSX script entry; native Windows applications "
-            "and other script runtimes are not supported by this entry point.");
-    result.entryScript = Path(root, declaredEntry, false);
-    if (Lower(fs::u8path(result.entryScript).extension().u8string()) != ".csx")
+    if (!declaredEntry.empty()) result.entryScript = Path(root, declaredEntry, false);
+    if (!declaredEntry.empty() && Lower(fs::u8path(result.entryScript).extension().u8string()) != ".csx")
         throw ConfigError("Unsupported entry format '" + result.entryScript + "': this runtime currently supports traditional Cotopha .csx only");
     result.compatibilityProfile = Attr(*script, "profile");
     if (!result.compatibilityProfile.empty()) Identifier(result.compatibilityProfile, "compatibility profile");
@@ -665,6 +660,15 @@ GameLaunchConfig NormalizeGameConfig(const fs::path& gameDir, const std::string&
         }
     }
     result.fontAliases=std::move(orderedAliases);
+    if (declaredEntry.empty()) {
+        if (!HasWitchEntry(archiveFiles))
+            throw ConfigError("No Cotopha .csx entry script is declared in " + source +
+                " (missing or empty <" + script->GetTag() + " src>). "
+                "No supported native WitchWizard main.srcxml entry was found.");
+        result.runtime = GameLaunchConfig::Runtime::WitchWizard;
+        result.entryScript = "main.srcxml";
+        Set(*output, "src", result.entryScript);
+    }
     result.normalizedXml = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n";
     Serialize(normalized,result.normalizedXml);
     // Include the separately loaded fonts in identity as they are omitted from

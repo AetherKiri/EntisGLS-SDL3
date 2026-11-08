@@ -17,6 +17,7 @@
 #include "runtime/cotopha_port/legacy_window_draw.h"
 #include "runtime/cotopha_port/legacy_sprite.h"
 #include "runtime/cotopha_port/legacy_sprite_projection.h"
+#include "runtime/witch/player.h"
 #include <sakuraglx/sprite/sglx_sprite_message.h>
 #include <SDL3/SDL_main.h>
 #include <nlohmann/json.hpp>
@@ -109,6 +110,12 @@ struct Player {
         platform::SetRuntimePaused(paused);
         studysteady::platform::SetSdlRuntimeAudioPaused(paused);
         ConfigureGameStorage(root, cache);
+        if (const auto* base = SDL_GetBasePath(); base && config.runtime == entis::launcher::GameLaunchConfig::Runtime::WitchWizard) {
+            for (const auto& relative : {"fonts/default.otf", "default.otf"}) {
+                const auto path = fs::u8path(base) / relative;
+                if (fs::is_regular_file(path)) { config.fallbackFont = path.u8string(); break; }
+            }
+        }
         entis::launcher::SetGamePsbKeyResolver(std::make_shared<entis::launcher::PsbKeyResolver>(root, cache, config.psbKey));
         platform::SetEmbeddedPresentation(true);
         platform::SetEmbeddedPlatformRequest(host.platform_request, host.user_data);
@@ -298,6 +305,10 @@ engine_result_t debug(void* opaque, char* output, uint32_t size, uint32_t* writt
             {"frame_serial", p.serial}, {"width", p.width}, {"height", p.height},
             {"input_events", p.inputs}, {"error", p.error}, {"visible_message_characters", 0}};
         data["save_directory"]=(p.root/"savedata").u8string();
+        if (p.config.runtime == entis::launcher::GameLaunchConfig::Runtime::WitchWizard) {
+            const auto state = entis::witch::Snapshot();
+            data["witch"] = state.is_object() ? state : nlohmann::json::object();
+        }
         if(p.sdk&&!p.finished.load()) {
             auto nodes=nlohmann::json::array();
             VisitLegacySprites([](const SakuraGL::SGLSprite& sprite,void* user) {
@@ -326,6 +337,8 @@ engine_result_t debug(void* opaque, char* output, uint32_t size, uint32_t* writt
             for(const auto& node:data["sprites"])if(node.value("message_visible",false))characters+=node.value("message_characters",size_t(0));
             data["visible_message_characters"]=characters;
         }
+        if (p.config.runtime == entis::launcher::GameLaunchConfig::Runtime::WitchWizard)
+            data["visible_message_characters"] = data["witch"].value("message_characters", std::size_t(0));
         p.debugSnapshot = data.dump();
         }
         *written = uint32_t(p.debugSnapshot.size() + 1);

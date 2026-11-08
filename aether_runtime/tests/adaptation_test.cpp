@@ -1,4 +1,5 @@
 #include "input.h"
+#include "runtime/witch/sdk.h"
 #include "font_discovery.h"
 #include "game_hooks.h"
 #include "compatibility/sdk/legacy/gls.h"
@@ -36,6 +37,35 @@ unsigned checks=0;
 void require(bool value,const char* name) {++checks;if(!value)throw std::runtime_error(name);}
 void near(double value,double expected,const char* name) {require(std::abs(value-expected)<0.0001,name);}
 template<class F> void rejects(F f) {bool rejected=false;try{f();}catch(const entis::launcher::ConfigError&){rejected=true;}require(rejected,"invalid configuration must be rejected");}
+void witchSdk() {
+    using namespace entis::witch::sdk;
+    for (const std::string text : {std::string(), std::string("ID_START"), std::string(u8"中文・日本語🌸")}) {
+        require(Utf8(Wide(text)) == text, "SDK UTF8 uses the returned byte count, including empty strings");
+    }
+    std::string xml = u8"<?xml version='1.0' encoding='utf-8'?><xscript><code><msg @l='12' name='名前' text='中文 &amp; 日本語🌸'/><select><menu text='continue' label='next'/></select></code></xscript>";
+    SSystem::SMemoryReferenceFile file; file.AttachMemory(xml.data(), xml.size());
+    const auto module = ReadModule(file, "fixture");
+    require(module.code.size() == 2 && module.code[0].tag == "msg", "native xscript code is parsed");
+    require(module.code[0].Get("name") == u8"名前" && module.code[0].Get("text") == u8"中文 & 日本語🌸", "XML attributes preserve Unicode and entities");
+    require(module.code[0].Get("@l") == "12", "SDK source-location attributes remain accepted");
+    require(module.code[1].children.size() == 1 && module.code[1].children[0].Get("label") == "next", "selection menus remain nested");
+    bool detached = true; unsigned destroyed = 0;
+    struct Child final : SakuraGL::SGLSprite {
+        SakuraGL::SGLSprite& root; bool& detached; unsigned& destroyed;
+        Child(SakuraGL::SGLSprite& r, bool& d, unsigned& n) : root(r), detached(d), destroyed(n) {}
+        ~Child() override {
+            detached &= root.GetChildCount() == 0;
+            // Texture destruction can yield to this same render traversal.
+            root.AdvanceTime(1); ++destroyed;
+        }
+    };
+    SakuraGL::SGLSprite root;
+    for (int i = 0; i < 4; ++i) root.AddSmartChild(new Child(root, detached, destroyed));
+    ClearChildren(root);
+    require(detached && destroyed == 4 && root.GetChildCount() == 0, "all children detach before any GPU destructor can reenter rendering");
+    ClearChildren(root);
+    require(destroyed == 4, "empty-tree cleanup is idempotent");
+}
 void encoding() {
     using entis::launcher::DecodeConfigurationText;
     const std::string jp="\x93\xfa\x96\x7b\x8c\xea";
@@ -605,7 +635,7 @@ int main(int argc,char** argv) {
         study::platform::sdl::SystemPaths paths;paths.assetsRoot=paths.storageRoot=paths.localRoot=paths.gameRoot=root.string();
         require(study::platform::sdl::ConfigureSystemPaths(paths),"fixture paths");SakuraGL::Initialize();ECotophaScript::Initialize(0);ECotophaScript::MultithreadReference(true);initialized=true;
         const std::string mode=argv[1];
-        if(mode=="game-hooks")gameHooks(root);else if(mode=="encoding")encoding();else if(mode=="input")input();else if(mode=="button-status")buttonStatus();else if(mode=="graphics")graphics();else if(mode=="image-cache")imageCache();else if(mode=="camera-cache")cameraCache();else if(mode=="control")control();else if(mode=="audio")audio();else if(mode=="fonts")fonts(root);else if(mode=="serialization")serialization();else throw std::runtime_error("unknown test mode");
+        if(mode=="witch-sdk")witchSdk();else if(mode=="game-hooks")gameHooks(root);else if(mode=="encoding")encoding();else if(mode=="input")input();else if(mode=="button-status")buttonStatus();else if(mode=="graphics")graphics();else if(mode=="image-cache")imageCache();else if(mode=="camera-cache")cameraCache();else if(mode=="control")control();else if(mode=="audio")audio();else if(mode=="fonts")fonts(root);else if(mode=="serialization")serialization();else throw std::runtime_error("unknown test mode");
         std::printf("EntisGLS %s PASS (%u checks)\n",argv[1],checks);
     }catch(const std::exception& error){std::fprintf(stderr,"EntisGLS adaptation FAIL: %s\n",error.what());result=1;}
     study::platform::sdl::ResumeRuntimeForShutdown();

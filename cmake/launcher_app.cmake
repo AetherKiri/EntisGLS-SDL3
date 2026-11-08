@@ -5,7 +5,20 @@ set(SDL_APP_SOURCES native/launcher/psb_key_dialog.cpp native/launcher/game_conf
     native/compatibility/games/compatibility_profiles.cpp apps/launcher/main.cpp "${LEGACY_HEAP_SDK}"
     native/platform/sdl/game_font_aliases.cpp
     native/platform/sdl/opentype_font.cpp
-    native/launcher/runtime_session.cpp)
+    native/launcher/runtime_session.cpp
+    native/runtime/witch/script.cpp native/runtime/witch/player.cpp)
+# The standalone SDK already carries nlohmann's single-header distribution for
+# glTF. Reuse it when no packaged version is installed; embedding hosts supply
+# their own nlohmann target.
+find_package(nlohmann_json CONFIG QUIET)
+if(NOT TARGET nlohmann_json::nlohmann_json)
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/witch-json/nlohmann")
+    configure_file("${STUDYSTEADY_ROOT}/vendor/official-tinygltf/json.hpp"
+        "${CMAKE_CURRENT_BINARY_DIR}/witch-json/nlohmann/json.hpp" COPYONLY)
+    add_library(entis_witch_json INTERFACE)
+    target_include_directories(entis_witch_json INTERFACE "${CMAKE_CURRENT_BINARY_DIR}/witch-json")
+    add_library(nlohmann_json::nlohmann_json ALIAS entis_witch_json)
+endif()
 if(ANDROID)
     add_library(studysteady_sdl SHARED ${SDL_APP_SOURCES} native/platform/android/android_game_files.cpp)
     set_target_properties(studysteady_sdl PROPERTIES OUTPUT_NAME main)
@@ -66,5 +79,5 @@ else()
             "${STUDYSTEADY_ROOT}/assets" "$<TARGET_FILE_DIR:studysteady_sdl>/assets")
     endif()
 endif()
-target_link_libraries(studysteady_sdl PRIVATE legacy_objects legacy_foundation gls4_sdl motion_apk_runtime freetype z)
+target_link_libraries(studysteady_sdl PRIVATE legacy_objects legacy_foundation gls4_sdl motion_apk_runtime freetype z nlohmann_json::nlohmann_json)
 entis_attach_cotopha_diagnostics(studysteady_sdl)

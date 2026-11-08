@@ -23,6 +23,9 @@
 #include "runtime/cotopha_port/legacy_sprite_callbacks.h"
 #include "runtime/cotopha_port/legacy_super_raster.h"
 #include "runtime/cotopha_port/legacy_super_shading.h"
+#if defined(STUDYSTEADY_PLATFORM_SDL3)
+#include "runtime/witch/player.h"
+#endif
 #include "platform/log.h"
 #include "extensions/emote/psb/psb_key_runtime.h"
 #include "extensions/emote/psb/psb_key_resolver.h"
@@ -108,7 +111,8 @@ int RunLegacyGame(const wchar_t *arguments, const entis::launcher::GameLaunchCon
     lastError.clear();
     RuntimeScope runtime;
     ECSEnvironment environment;
-    study::platform::LogWrite(study::platform::LogPriority::Info, "EntisGLS", "Starting traditional Cotopha runtime");
+    study::platform::LogWrite(study::platform::LogPriority::Info, "EntisGLS",
+        launch && launch->runtime == entis::launcher::GameLaunchConfig::Runtime::WitchWizard ? "Starting native WitchWizard runtime" : "Starting traditional Cotopha runtime");
 #if defined(STUDYSTEADY_PLATFORM_SDL3)
     if (!launch) return Fail(1, "Missing resolved game configuration");
     environment.SetResourceOverrides(launch->resourceOverrides);
@@ -120,6 +124,11 @@ int RunLegacyGame(const wchar_t *arguments, const entis::launcher::GameLaunchCon
     config.AttachMemory(const_cast<char*>(launch->normalizedXml.data()), launch->normalizedXml.size());
     if (environment.LoadEnvironment(config)) return Fail(1, "Could not load game environment: " + launch->configSource);
     using namespace study::platform::sdl;
+    if (!launch->fallbackFont.empty()) {
+        const auto registered = RegisterOpenTypeFont(Wide(launch->fallbackFont), {},
+            [&](const wchar_t* path) { return environment.NewOpenFile(path, SSystem::SFileOpener::shareRead); }, L"@aether:default");
+        if (!registered.loaded) return Fail(38, "Cannot load the host fallback font: " + registered.error);
+    }
     if (!launch->fontOverride.empty()) {
         const auto registered = RegisterOpenTypeFont(Wide(launch->fontOverride), {},
             [&](const wchar_t* path) { return environment.NewOpenFile(path, SSystem::SFileOpener::shareRead); }, L"@aether:lua");
@@ -223,6 +232,14 @@ int RunLegacyGame(const wchar_t *arguments, const entis::launcher::GameLaunchCon
 #endif
 
 #if defined(STUDYSTEADY_PLATFORM_SDL3)
+    if (launch->runtime == entis::launcher::GameLaunchConfig::Runtime::WitchWizard) {
+        struct ClearAbort { ~ClearAbort() { std::lock_guard<std::mutex> guard(activeMutex); abortRequested = false; } } clearAbort;
+        try {
+            return entis::witch::Run(environment, *launch, [] {
+                std::lock_guard<std::mutex> guard(activeMutex); return abortRequested;
+            });
+        } catch (const std::exception& error) { return Fail(39, error.what()); }
+    }
     auto* file = environment.NewOpenFile(Wide(launch->entryScript).c_str(), SSystem::SFileOpener::shareRead);
     std::unique_ptr<ESLFileObject> script(file ? new LegacyFileAdapter(file, ESLFileObject::modeRead) : nullptr);
     if (!script) return Fail(3, "Entry script not found: " + launch->entryScript);
