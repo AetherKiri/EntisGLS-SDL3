@@ -50,6 +50,8 @@ target_link_libraries(aether_entisgls_runtime PRIVATE legacy_objects legacy_foun
     motion_apk_runtime freetype nlohmann_json::nlohmann_json aether_game_hooks)
 if(ANDROID)
     target_link_libraries(aether_entisgls_runtime PRIVATE EGL)
+    add_executable(aether_entisgls_android_host_test EXCLUDE_FROM_ALL tests/android_host_test.cpp)
+    target_link_libraries(aether_entisgls_android_host_test PRIVATE SDL3::SDL3 GLESv3)
 endif()
 set_target_properties(aether_entisgls_runtime PROPERTIES CXX_VISIBILITY_PRESET hidden
     C_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)

@@ -203,7 +203,9 @@ SGLError SGLGenericWindow::CreateWindowSimply(const wchar_t* title, uint32_t wid
                 Trace("SDL GL context: %s\n", SDL_GetError()); SDL_DestroyWindow(state->window);
                 return sglErrFailed;
             }
-            if (!study::platform::sdl::ConfigureImmediatePresentation()) {
+            // Embedded frames are read back before Godot presents them. EGL
+            // pbuffers need no swap interval and may reject eglSwapInterval.
+            if (!embeddedPresentation && !study::platform::sdl::ConfigureImmediatePresentation()) {
                 Trace("SDL immediate presentation unavailable: %s\n", SDL_GetError());
                 SDL_GL_DestroyContext(state->context); SDL_DestroyWindow(state->window);
                 return sglErrFailed;
