@@ -42,8 +42,8 @@ Declaration Encoding(const std::string& input) {
     return result;
 }
 }
-std::string DecodeConfigurationText(const std::string& input) {
-    if (input.size() > 1024 * 1024) throw ConfigError("XML configuration exceeds 1 MiB");
+std::string DecodeConfigurationText(const std::string& input, std::size_t maximumBytes) {
+    if (input.size() > maximumBytes) throw ConfigError("XML exceeds the configured size limit");
     std::string text = input;
     bool utf16 = false, littleEndian = false;
     if (text.size() >= 2 && ((uint8_t(text[0]) == 0xff && uint8_t(text[1]) == 0xfe) ||

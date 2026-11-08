@@ -2,6 +2,7 @@
 #include <sakuraglx/sprite/sglx_sprite.h>
 #include "runtime/cotopha_port/legacy_sprite_dynamic.h"
 #include "runtime/cotopha_port/legacy_sprite_projection.h"
+#include "runtime/cotopha_port/legacy_button_notification.h"
 
 class ECSContext;
 class ECSExecutionImage;
@@ -30,7 +31,7 @@ bool InvokeLegacySpriteCallback(const SakuraGL::SGLSprite*, LegacySpriteCallback
 
 // The legacy interface has ordering requirements that the current SDK's single
 // listener slot cannot express. Keep that slot available to native skin controls.
-template<class Base> class LegacyCallbackSprite : public Base {
+template<class Base> class LegacyCallbackSprite : public Base, public LegacyButtonCommandTarget {
 public:
     using Base::Base;
     bool GetPaintParam(SakuraGL::SGLPaintParam& paint, SakuraGL::SGLAffine& affine,

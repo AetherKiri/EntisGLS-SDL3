@@ -85,6 +85,24 @@ def main():
         # not fall through into the second unlock and a missing system backend.
         return s.replace(old, old + '\n\t\t\treturn sglErrFailed;')
     source_copy('Source/common/sakuragl/sgl2d/sgl_font.cpp', font)
+    def button_notifications(s):
+        old = '\t\t\t\t\t\tm_statusButton, commandNormal, true ) ;'
+        if s.count(old) != 1:
+            raise ValueError('SDK button status notification changed')
+        # Translate only native button status events delivered to a GLS3 tree.
+        # The SDK listener, view state and unrelated commands keep GLS4 values.
+        return ('#include "runtime/cotopha_port/legacy_button_notification.h"\n' +
+                s.replace(old, '\t\t\t\t\t\tTranslateLegacyButtonStatusNotification( pParent, m_statusButton ),\n'
+                               '\t\t\t\t\t\tcommandNormal, true ) ;'))
+    source_copy('Source/common/sakuraglx/sprite/sglx_sprite_button.cpp', button_notifications)
+    def message_link_input(s):
+        old = '\tif ( m_pFocusLink == pHitLink )'
+        if s.count(old) != 2:
+            raise ValueError('SDK message link mouse handlers changed')
+        # Empty/ordinary text has neither a focused nor a hit link. Equality
+        # of those two null pointers must not enter the link-click handler.
+        return s.replace(old, '\tif ( pHitLink != NULL && m_pFocusLink == pHitLink )')
+    source_copy('Source/common/sakuraglx/sprite/sglx_sprite_message.cpp', message_link_input)
     source_copy('Source/common/glscs/glscs_sakura2_jit_native_compiler.cpp', lambda s:
         s.replace('sizePageUnit = PAGE_SIZE', 'return nullptr'))
     def std_application(s):

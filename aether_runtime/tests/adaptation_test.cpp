@@ -1,4 +1,5 @@
 #include "input.h"
+#include "runtime/witch/sdk.h"
 #include "font_discovery.h"
 #include "game_hooks.h"
 #include "compatibility/sdk/legacy/gls.h"
@@ -12,6 +13,8 @@
 #include "runtime/cotopha_port/legacy_sprite_draw.h"
 #include "runtime/cotopha_port/legacy_sprite_projection.h"
 #include "runtime/cotopha_port/legacy_message.h"
+#include "runtime/cotopha_port/legacy_window.h"
+#include <sakuraglx/sprite/sglx_sprite_button.h>
 #include <SDL3/SDL.h>
 #include <atomic>
 #include <cmath>
@@ -27,12 +30,42 @@
 #include <limits>
 #include <stdexcept>
 #include <thread>
+#include <vector>
 
 namespace {
 unsigned checks=0;
 void require(bool value,const char* name) {++checks;if(!value)throw std::runtime_error(name);}
 void near(double value,double expected,const char* name) {require(std::abs(value-expected)<0.0001,name);}
 template<class F> void rejects(F f) {bool rejected=false;try{f();}catch(const entis::launcher::ConfigError&){rejected=true;}require(rejected,"invalid configuration must be rejected");}
+void witchSdk() {
+    using namespace entis::witch::sdk;
+    for (const std::string text : {std::string(), std::string("ID_START"), std::string(u8"中文・日本語🌸")}) {
+        require(Utf8(Wide(text)) == text, "SDK UTF8 uses the returned byte count, including empty strings");
+    }
+    std::string xml = u8"<?xml version='1.0' encoding='utf-8'?><xscript><code><msg @l='12' name='名前' text='中文 &amp; 日本語🌸'/><select><menu text='continue' label='next'/></select></code></xscript>";
+    SSystem::SMemoryReferenceFile file; file.AttachMemory(xml.data(), xml.size());
+    const auto module = ReadModule(file, "fixture");
+    require(module.code.size() == 2 && module.code[0].tag == "msg", "native xscript code is parsed");
+    require(module.code[0].Get("name") == u8"名前" && module.code[0].Get("text") == u8"中文 & 日本語🌸", "XML attributes preserve Unicode and entities");
+    require(module.code[0].Get("@l") == "12", "SDK source-location attributes remain accepted");
+    require(module.code[1].children.size() == 1 && module.code[1].children[0].Get("label") == "next", "selection menus remain nested");
+    bool detached = true; unsigned destroyed = 0;
+    struct Child final : SakuraGL::SGLSprite {
+        SakuraGL::SGLSprite& root; bool& detached; unsigned& destroyed;
+        Child(SakuraGL::SGLSprite& r, bool& d, unsigned& n) : root(r), detached(d), destroyed(n) {}
+        ~Child() override {
+            detached &= root.GetChildCount() == 0;
+            // Texture destruction can yield to this same render traversal.
+            root.AdvanceTime(1); ++destroyed;
+        }
+    };
+    SakuraGL::SGLSprite root;
+    for (int i = 0; i < 4; ++i) root.AddSmartChild(new Child(root, detached, destroyed));
+    ClearChildren(root);
+    require(detached && destroyed == 4 && root.GetChildCount() == 0, "all children detach before any GPU destructor can reenter rendering");
+    ClearChildren(root);
+    require(destroyed == 4, "empty-tree cleanup is idempotent");
+}
 void encoding() {
     using entis::launcher::DecodeConfigurationText;
     const std::string jp="\x93\xfa\x96\x7b\x8c\xea";
@@ -489,6 +522,74 @@ void gameHooks(const std::filesystem::path& root) {
     require(rejected, "unsupported CSX encoding is reported, not silently ignored");
     fs::remove(root / "aether.lua");
 }
+void buttonStatus() {
+    using namespace SakuraGL;
+    struct Commands final : SGLSpriteKeyListener {
+        std::vector<int64_t> status;
+        bool OnCommand(SGLSprite&, const wchar_t*, int64_t parameter,
+                       int64_t notification, int, bool) override {
+            if (parameter == 73) status.push_back(notification);
+            return true;
+        }
+    } commands;
+    ECSSprite owner;
+    SGLSprite group;
+    SGLSpriteButton button;
+    owner.NativeSprite().AttachKeyListener(&commands);
+    group.SetID(L"GROUP");
+    button.SetID(L"ID_BUTTON");
+    owner.NativeSprite().AddChild(&group);
+    group.AddChild(&button);
+    struct Detach {
+        ECSSprite& owner; SGLSprite& group; SGLSpriteButton& button;
+        ~Detach() {group.DetachChild(&button); owner.NativeSprite().DetachChild(&group);}
+    } detach{owner, group, button};
+    button.SetButtonSize(SGLSize(64, 32));
+    auto style = button.GetButtonStyle();
+    style.flagHitRect = true;
+    button.SetButtonStyle(style);
+    button.SetStatusNotification(true, 73);
+    auto expect = [&](int legacy, SGLSpriteButton::ButtonStatus native, const char* name) {
+        require(commands.status == std::vector<int64_t>{legacy}, name);
+        require(button.GetButtonStatus() == native, "native button state retains SDK numbering");
+        commands.status.clear();
+    };
+    button.SetEnable(false);
+    expect(4, SGLSpriteButton::statusDisabled, "disabling a button clears legacy hover help");
+    button.SetEnable(true);
+    expect(0, SGLSpriteButton::statusNormal, "reenabling an unhovered button reports normal");
+    button.OnMouseMove(10, 10, 0);
+    expect(1, SGLSpriteButton::statusFocus, "hover reports legacy focus");
+    button.OnLButtonDown(10, 10, 0);
+    expect(6, SGLSpriteButton::statusActive, "pressed button reports legacy active-pushed");
+    button.OnLButtonUp(10, 10, 0);
+    expect(1, SGLSpriteButton::statusFocus, "release returns to hover");
+    button.CheckButton(true);
+    expect(3, SGLSpriteButton::statusPushedFocus, "checked hover retains legacy status");
+    button.OnLButtonDown(10, 10, 0);
+    expect(6, SGLSpriteButton::statusPushedActive, "pressed checked button uses the same legacy active status");
+    button.OnLButtonUp(10, 10, 0);
+    expect(3, SGLSpriteButton::statusPushedFocus, "checked release returns to checked hover");
+    button.OnMouseLeave(0);
+    expect(2, SGLSpriteButton::statusPushed, "checked leave clears hover");
+    button.SetEnable(false);
+    expect(5, SGLSpriteButton::statusPushDisabled, "disabled checked button has legacy status five");
+    button.SetEnable(true);
+    expect(2, SGLSpriteButton::statusPushed, "reenabling preserves the check mark");
+    button.CheckButton(false);
+    expect(0, SGLSpriteButton::statusNormal, "unchecking returns to normal");
+    // Numeric notifications from scripts and other controls are not button states.
+    group.OnCommand(L"ID_BUTTON", 73, 6, 0, true);
+    expect(6, SGLSpriteButton::statusNormal, "ordinary commands retain their notification value");
+    owner.NativeSprite().DetachChild(&group);
+    SGLSprite nativeOwner;
+    nativeOwner.AttachKeyListener(&commands);
+    nativeOwner.AddChild(&group);
+    button.SetEnable(false);
+    expect(6, SGLSpriteButton::statusDisabled, "native SDK consumers retain native status notifications");
+    nativeOwner.DetachChild(&group);
+    require(CheckLegacyWindowCommandQueue(), "status conversion preserves click and command queue behavior");
+}
 void control() {
     auto* mutex=ECSSakura2Processor::mutexGlobalAtomic;
     auto* signal=ECSSakura2Processor::signalLeave;
@@ -534,7 +635,7 @@ int main(int argc,char** argv) {
         study::platform::sdl::SystemPaths paths;paths.assetsRoot=paths.storageRoot=paths.localRoot=paths.gameRoot=root.string();
         require(study::platform::sdl::ConfigureSystemPaths(paths),"fixture paths");SakuraGL::Initialize();ECotophaScript::Initialize(0);ECotophaScript::MultithreadReference(true);initialized=true;
         const std::string mode=argv[1];
-        if(mode=="game-hooks")gameHooks(root);else if(mode=="encoding")encoding();else if(mode=="input")input();else if(mode=="graphics")graphics();else if(mode=="image-cache")imageCache();else if(mode=="camera-cache")cameraCache();else if(mode=="control")control();else if(mode=="audio")audio();else if(mode=="fonts")fonts(root);else if(mode=="serialization")serialization();else throw std::runtime_error("unknown test mode");
+        if(mode=="witch-sdk")witchSdk();else if(mode=="game-hooks")gameHooks(root);else if(mode=="encoding")encoding();else if(mode=="input")input();else if(mode=="button-status")buttonStatus();else if(mode=="graphics")graphics();else if(mode=="image-cache")imageCache();else if(mode=="camera-cache")cameraCache();else if(mode=="control")control();else if(mode=="audio")audio();else if(mode=="fonts")fonts(root);else if(mode=="serialization")serialization();else throw std::runtime_error("unknown test mode");
         std::printf("EntisGLS %s PASS (%u checks)\n",argv[1],checks);
     }catch(const std::exception& error){std::fprintf(stderr,"EntisGLS adaptation FAIL: %s\n",error.what());result=1;}
     study::platform::sdl::ResumeRuntimeForShutdown();

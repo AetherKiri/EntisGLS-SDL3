@@ -396,6 +396,23 @@ int main(int argc, char** argv) {
                 "real executable configuration takes precedence over archive fallback");
         Write(fallbackGame/"engine.exe",Pe("<script/>"));
         Reject([&] { DiscoverGame(fallbackGame); },"No Cotopha .csx entry script is declared");
+        const auto witchGame = root / "native-witch";
+        fs::create_directories(witchGame);
+        Write(witchGame/"engine.exe", Pe("<script><archive path='script.noa'/><display width='1280' height='720'/></script>"));
+        const std::string witchEntry = "<?xml version='1.0' encoding='utf-8'?><xscript><code><msg name='' text='fixture'/></code></xscript>";
+        for (bool compressed : {false, true}) {
+            Write(witchGame/"script.noa", Noa({{"main.srcxml", witchEntry, compressed}}));
+            const auto witch = DiscoverGame(witchGame);
+            Require(witch.runtime == GameLaunchConfig::Runtime::WitchWizard && witch.entryScript == "main.srcxml",
+                    "native WitchWizard raw/compressed entry is positively identified");
+            Require(witch.normalizedXml.find("storage://game/savedata") != std::string::npos,
+                    "native saves use the game-local directory");
+        }
+        Write(witchGame/"script.noa", Noa({{"main.srcxml", "<unrelated><code>not a Witch script</code></unrelated>"}}));
+        Reject([&] { DiscoverGame(witchGame); }, "No Cotopha .csx entry script is declared");
+        Write(witchGame/"script.noa", Noa({{"main.srcxml", witchEntry}}));
+        Write(witchGame/"engine.exe", Pe("<script/>"));
+        Reject([&] { DiscoverGame(witchGame); }, "No Cotopha .csx entry script is declared");
         fs::remove(fallbackGame/"engine.exe");
         Write(fallbackGame/"cotopha.xml","<script src='manual.csx'/>");
         Require(DiscoverGame(fallbackGame).entryScript=="manual.csx",

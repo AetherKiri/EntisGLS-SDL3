@@ -82,6 +82,7 @@ struct Entry {
 };
 struct Index {
     std::optional<Entry> script;
+    std::optional<Entry> witch;
     std::optional<Entry> font;
     std::optional<Entry> verticalFont;
 };
@@ -128,7 +129,7 @@ Index ReadIndex(const fs::path& path, std::size_t& totalIndices) {
             !Span(64 + entry.offset, 16, input.Size()))
             Invalid(path, "invalid NOA file offset");
         const auto name = Lower(entry.name);
-        auto* selected = name == "script.csx" ? &result.script : name == "msgfont.bmf" ? &result.font :
+        auto* selected = name == "script.csx" ? &result.script : name == "main.srcxml" ? &result.witch : name == "msgfont.bmf" ? &result.font :
                          name == "msgfont_v.bmf" ? &result.verticalFont : nullptr;
         if (!selected) continue;
         if (*selected) Invalid(path, "duplicate standard resource name: " + name);
@@ -203,6 +204,38 @@ bool ArchiveOrder(const io::Entry& a, const io::Entry& b) {
     return an != bn ? an < bn : a.name < b.name;
 }
 } // namespace
+
+bool HasWitchEntry(const std::vector<fs::path>& archives) {
+    if (archives.size() > maxArchives) throw ConfigError("Too many WitchWizard archives");
+    std::size_t indices = 0;
+    for (const auto& path : archives) {
+        if (io::Stat(path).kind != io::FileInfo::Kind::File) continue;
+        const auto index = ReadIndex(path, indices);
+        if (!index.witch) continue;
+        const auto& entry = *index.witch;
+        if (entry.size < 16 || entry.size > 16 * 1024 * 1024) Invalid(path, "invalid main.srcxml size");
+        ArchiveInput input(path);
+        std::array<std::uint8_t, 16> chunk{};
+        input.Read(64 + entry.offset, chunk.data(), chunk.size());
+        const auto stored = U64(chunk.data() + 8), start = 80 + entry.offset;
+        if (std::memcmp(chunk.data(), "filedata", 8) || !Span(start, stored, input.Size()))
+            Invalid(path, "invalid main.srcxml payload");
+        std::string header(static_cast<std::size_t>(std::min<std::uint64_t>(entry.size, 4096)), '\0');
+        if (entry.encoding == 0) {
+            if (stored != entry.size) Invalid(path, "invalid raw main.srcxml length");
+            input.Read(start, header.data(), header.size());
+        } else if (entry.encoding == 0x80000010) {
+            LimitedInput stream(input.Stream(), std::min(stored, maxHeaderInput));
+            ERISA::SGLDecodeBitStream bits(0x4000); bits.AttachInputStream(&stream);
+            ERISA::SGLERISANDecodeContext decoder(&bits); decoder.PrepareToDecodeERISANCode();
+            if (decoder.Read(header.data(), header.size()) != header.size()) Invalid(path, "cannot decode main.srcxml");
+        } else return false;
+        // This is only a bounded format probe. The runtime parses and validates
+        // the complete XML before executing any command.
+        return header.find("<xscript>") != std::string::npos && header.find("<code>") != std::string::npos;
+    }
+    return false;
+}
 
 std::optional<GameLaunchConfig> DiscoverArchiveFallback(const fs::path& root) {
     try {

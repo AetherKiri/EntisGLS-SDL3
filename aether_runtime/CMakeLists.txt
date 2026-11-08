@@ -36,6 +36,8 @@ add_library(aether_entisgls_runtime SHARED src/provider.cpp src/input.cpp src/fo
     "${entis_vendor}/native/launcher/config_encoding.cpp"
     "${entis_vendor}/native/launcher/archive_launch_fallback.cpp"
     "${entis_vendor}/native/launcher/runtime_session.cpp"
+    "${entis_vendor}/native/runtime/witch/script.cpp"
+    "${entis_vendor}/native/runtime/witch/player.cpp"
     "${entis_vendor}/native/compatibility/games/compatibility_profiles.cpp"
     "${entis_vendor}/native/platform/sdl/game_font_aliases.cpp"
     "${entis_vendor}/native/platform/sdl/opentype_font.cpp"
@@ -60,6 +62,12 @@ elseif(UNIX)
 endif()
 
 if(AETHERKIRI_BUILD_ENTISGLS_TESTS)
+    add_executable(aether_entisgls_witch_test EXCLUDE_FROM_ALL
+        "${entis_vendor}/tests/unit/witch/script_test.cpp" "${entis_vendor}/native/runtime/witch/script.cpp")
+    target_compile_features(aether_entisgls_witch_test PRIVATE cxx_std_17)
+    target_include_directories(aether_entisgls_witch_test PRIVATE "${entis_vendor}/native")
+    target_link_libraries(aether_entisgls_witch_test PRIVATE nlohmann_json::nlohmann_json)
+    add_test(NAME entisgls-witch-script COMMAND aether_entisgls_witch_test)
     add_executable(aether_entisgls_storage_test EXCLUDE_FROM_ALL tests/storage_test.cpp src/storage.cpp)
     target_compile_features(aether_entisgls_storage_test PRIVATE cxx_std_17)
     target_include_directories(aether_entisgls_storage_test PRIVATE src)
@@ -70,6 +78,7 @@ if(AETHERKIRI_BUILD_ENTISGLS_TESTS)
     target_link_libraries(aether_entisgls_provider_test PRIVATE aether_entisgls_runtime nlohmann_json::nlohmann_json)
     add_test(NAME entisgls-provider COMMAND aether_entisgls_provider_test "${CMAKE_CURRENT_BINARY_DIR}/csx-fixture" "${CMAKE_CURRENT_BINARY_DIR}/provider-fixture")
     add_executable(aether_entisgls_adaptation_test EXCLUDE_FROM_ALL tests/adaptation_test.cpp src/input.cpp src/font_discovery.cpp src/game_hooks.cpp
+        "${entis_vendor}/native/runtime/witch/script.cpp"
         "${entis_vendor}/native/launcher/config_encoding.cpp"
         "${entis_vendor}/native/compatibility/games/compatibility_profiles.cpp"
         "${entis_vendor}/native/platform/sdl/game_font_aliases.cpp"
@@ -77,8 +86,8 @@ if(AETHERKIRI_BUILD_ENTISGLS_TESTS)
         "${CMAKE_CURRENT_BINARY_DIR}/sdk/legacy_heap_sdk/glscs_sakura2_obj_heap.cpp")
     target_compile_features(aether_entisgls_adaptation_test PRIVATE cxx_std_17)
     target_include_directories(aether_entisgls_adaptation_test PRIVATE src "${AETHER_ENTISGLS_HOST_ROOT}/abi/include")
-    target_link_libraries(aether_entisgls_adaptation_test PRIVATE legacy_objects legacy_foundation gls4_sdl motion_apk_runtime freetype aether_game_hooks)
-    foreach(mode encoding input graphics image-cache camera-cache control audio fonts serialization game-hooks)
+    target_link_libraries(aether_entisgls_adaptation_test PRIVATE legacy_objects legacy_foundation gls4_sdl motion_apk_runtime freetype aether_game_hooks nlohmann_json::nlohmann_json)
+    foreach(mode encoding input button-status graphics image-cache camera-cache control audio fonts serialization game-hooks witch-sdk)
         add_test(NAME entisgls-${mode} COMMAND aether_entisgls_adaptation_test ${mode} "${CMAKE_CURRENT_BINARY_DIR}/adaptation-${mode}")
     endforeach()
     add_test(NAME entisgls-configuration COMMAND launcher_config_test "${CMAKE_CURRENT_BINARY_DIR}/config-fixtures")
@@ -100,7 +109,7 @@ if(AETHERKIRI_BUILD_ENTISGLS_TESTS)
         ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
     # Integrated CI builds the default target before running the full CTest
     # inventory. Include every registered executable when tests are enabled.
-    add_custom_target(aether_entisgls_tests ALL DEPENDS launcher_config_test legacy_speech_test
+    add_custom_target(aether_entisgls_tests ALL DEPENDS launcher_config_test legacy_speech_test aether_entisgls_witch_test
         aether_entisgls_adaptation_test aether_entisgls_provider_test aether_entisgls_storage_test
         legacy_setup_fonts_test legacy_emote_api_test motion_atlas_projection_test
         psb_key_resolver_test psb_key_settings_test game_save_directory_test legacy_atomic_path_test
