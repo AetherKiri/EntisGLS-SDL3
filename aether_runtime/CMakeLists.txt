@@ -46,6 +46,9 @@ target_include_directories(aether_entisgls_runtime PUBLIC "${CMAKE_CURRENT_SOURC
     "${AETHER_ENTISGLS_HOST_ROOT}/abi/include")
 target_link_libraries(aether_entisgls_runtime PRIVATE legacy_objects legacy_foundation gls4_sdl
     motion_apk_runtime freetype nlohmann_json::nlohmann_json aether_game_hooks)
+if(ANDROID)
+    target_link_libraries(aether_entisgls_runtime PRIVATE EGL)
+endif()
 set_target_properties(aether_entisgls_runtime PROPERTIES CXX_VISIBILITY_PRESET hidden
     C_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
 if(APPLE)

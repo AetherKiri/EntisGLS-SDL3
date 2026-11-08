@@ -11,6 +11,7 @@ from _bootstrap import ROOT
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -113,6 +114,59 @@ SDL_free(variables);
         'sha256': hashlib.sha256(loquaty_file.read_bytes()).hexdigest(),
         'output': 'loquaty/loquaty_file.cpp'})
 
+    for name, count in (('loquaty_cls_clock.cpp', 3), ('loquaty_date_time.cpp', 2)):
+        clock_source = ROOT/'vendor/official-loquaty/Loquaty/source'/name
+        clock_text = clock_source.read_text(encoding='utf-8-sig')
+        clock_call = 'std::timespec_get( &ts, TIME_UTC )'
+        if clock_text.count(clock_call) != count:
+            raise ValueError('Loquaty clock entry points changed: ' + name)
+        clock_text = clock_text.replace(clock_call, 'EntisTimespecGet( &ts )')
+        clock_text = clock_text.replace('#include <loquaty.h>', '''#include <loquaty.h>
+static int EntisTimespecGet(std::timespec* value) {
+#if defined(__ANDROID__) && __ANDROID_API__ < 29
+    return clock_gettime(CLOCK_REALTIME, value) == 0 ? TIME_UTC : 0;
+#else
+    return std::timespec_get(value, TIME_UTC);
+#endif
+}''')
+        write(out/'loquaty'/name, clock_text)
+        records.append({'source': str(clock_source.relative_to(ROOT)),
+            'sha256': hashlib.sha256(clock_source.read_bytes()).hexdigest(),
+            'output': 'loquaty/' + name})
+
+    # Android's EGL provides a default display and pbuffers, but commonly not
+    # desktop device-enumeration extensions. Godot owns the display connection.
+    egl_source = ROOT/'vendor/sdl3/src/video/SDL_egl.c'
+    egl_text = egl_source.read_text()
+    anchor = '    // Check for all extensions that are optional until used and fail if any is missing\n'
+    if egl_text.count(anchor) != 1:
+        raise ValueError('SDL offscreen EGL initialization changed')
+    egl_text = egl_text.replace(anchor, '''#if defined(SDL_PLATFORM_ANDROID)
+    _this->egl_data->egl_display = _this->egl_data->eglGetDisplay(EGL_DEFAULT_DISPLAY);
+    if (_this->egl_data->egl_display == EGL_NO_DISPLAY ||
+        !_this->egl_data->eglInitialize(_this->egl_data->egl_display, NULL, NULL)) {
+        return SDL_SetError("Could not initialize the Android EGL display");
+    }
+    SDL_EGL_GetVersion(_this);
+    _this->egl_data->is_offscreen = true;
+    return true;
+#endif
+
+''' + anchor)
+    terminate = '            _this->egl_data->eglTerminate(_this->egl_data->egl_display);'
+    if egl_text.count(terminate) != 1:
+        raise ValueError('SDL EGL display teardown changed')
+    egl_text = egl_text.replace(terminate, '''            // Private contexts/surfaces are destroyed by SDL; terminating
+            // this process-wide display would also destroy Godot's contexts.''')
+    def egl_include(match):
+        header = egl_source.parent/match[1]
+        return '#include "' + str(header.resolve()) + '"' if header.is_file() else match[0]
+    egl_text = re.sub(r'#include "([^"]+)"', egl_include, egl_text)
+    write(out/'source/SDL_egl.c', egl_text)
+    records.append({'source': str(egl_source.relative_to(ROOT)),
+        'sha256': hashlib.sha256(egl_source.read_bytes()).hexdigest(),
+        'output': 'source/SDL_egl.c'})
+
     # The original backend uses operating-system macros to select graphics APIs
     # and WGL ownership. SDL owns contexts on every OS; GLES is a separate choice.
     def graphics(s):
@@ -181,7 +235,6 @@ SDL_free(variables);
         target = out/'Source/opengl/sakuragl'/filename
         text = generated[target]
         text = '#include "platform/sdl/gl_drawable.h"\n' + text
-        import re
         calls = list(re.finditer(r'^\s*glBindFramebuffer\s*\(', text, re.MULTILINE))
         expected = 7 if filename == 'sgl_opengl_context.cpp' else 6
         if len(calls) != expected: raise ValueError(f'SDK framebuffer calls changed: {filename}')
@@ -207,7 +260,6 @@ SDL_free(variables);
         generated[target] = text
 
     original_header = (COTOPHA/'Include/opengl/sakuragl/sgl_opengl_extension.h').read_text(encoding='utf-8-sig')
-    import re
     names = sorted(set(re.findall(r'API_(gl\w+)', original_header)))
     # SDL's desktop header declares more than OpenGL 1.1. Hide declarations
     # which the SDK intentionally loads into its own OpenGLExtension namespace.
