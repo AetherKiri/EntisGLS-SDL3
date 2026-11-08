@@ -748,13 +748,34 @@ GameLaunchConfig DiscoverGame(const fs::path& gameDir, const fs::path& explicitC
         if (!scanErrors.empty()) message += " First EXE read error: " + scanErrors.front();
         throw ConfigError(message);
     }
-    if (candidates.size() != 1) {
+    std::optional<GameLaunchConfig> result;
+    std::string selectedXml;
+    std::vector<fs::path> distinctLaunchers;
+    for (const auto& candidate : candidates) {
+        try {
+            auto config = fromExecutable(candidate.first, candidate.second);
+            const auto xml = DecodeConfig(candidate.second.front().bytes);
+            if (!result) {
+                selectedXml = xml;
+                result = std::move(config);
+                distinctLaunchers.push_back(candidate.first);
+            } else if (xml != selectedXml) {
+                distinctLaunchers.push_back(candidate.first);
+            }
+        } catch (const ConfigError& error) {
+            scanErrors.push_back(candidate.first.filename().u8string() + ": " + error.what());
+        }
+    }
+    // Installers and uninstallers can also carry IDR_COTOMI resources. Only
+    // valid game configurations participate in automatic selection, and
+    // original/patched EXEs with the same document describe a single launch.
+    if (!result) throw ConfigError(scanErrors.back());
+    if (distinctLaunchers.size() != 1) {
         std::string message = "Multiple game executables contain launch configurations; select one explicitly or supply entis-launcher.xml:";
-        for (const auto& candidate : candidates) message += " " + candidate.first.filename().u8string();
+        for (const auto& candidate : distinctLaunchers) message += " " + candidate.filename().u8string();
         throw ConfigError(message);
     }
-    auto result = fromExecutable(candidates.front().first, candidates.front().second);
-    result.warnings.insert(result.warnings.end(), scanErrors.begin(), scanErrors.end());
-    return result;
+    result->warnings.insert(result->warnings.end(), scanErrors.begin(), scanErrors.end());
+    return std::move(*result);
 }
 } // namespace entis::launcher

@@ -3,6 +3,7 @@
 #include "../../fixtures/game_file_backend_fixture.h"
 #include <sakuraglx/sakuraglx.h>
 #include <sakuragl/sgl_erisa_lib.h>
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -277,6 +278,17 @@ int main(int argc, char** argv) {
         Write(peGame/"engine.exe",Pe("<script src='custom.csx'><file path='.'/></script>"));
         auto fromPe=DiscoverGame(peGame);
         Require(fromPe.entryScript=="custom.csx" && fromPe.configSource=="engine.exe:IDR_COTOMI","PE32 configuration extraction without executing EXE");
+        Write(peGame/"translated.exe",Pe("<script src='custom.csx'><file path='.'/></script>",true));
+        Write(peGame/"uninstall.exe",Pe("<script>uninstall helper</script>"));
+        auto equivalent=DiscoverGame(peGame);
+        Require(equivalent.normalizedXml==fromPe.normalizedXml && equivalent.gameId==fromPe.gameId,
+                "equivalent original and translated launchers are one game despite an invalid helper configuration");
+        Require(std::any_of(equivalent.warnings.begin(), equivalent.warnings.end(), [](const auto& warning) {
+            return warning.find("uninstall.exe:") != std::string::npos && warning.find("unexpected text") != std::string::npos;
+        }),"invalid helper diagnostic identifies its executable and rejection reason");
+        Reject([&] { DiscoverGame(peGame,"uninstall.exe"); },"unexpected text");
+        fs::remove(peGame/"translated.exe");
+        fs::remove(peGame/"uninstall.exe");
         const auto nativeGame=root/"native-environment";
         Write(nativeGame/"engine.exe",Pe("<script><archive path='data.noa'/><display width='1280' height='720'/></script>"));
         Reject([&] { DiscoverGame(nativeGame); },"No Cotopha .csx entry script is declared in engine.exe:IDR_COTOMI");

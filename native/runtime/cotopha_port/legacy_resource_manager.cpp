@@ -7,7 +7,7 @@
 #include <utility>
 #if defined(STUDYSTEADY_PLATFORM_SDL3)
 #include "platform/sdl/game_file_metrics.h"
-#if defined(__ANDROID__)
+#if defined(__ANDROID__) && !defined(AETHER_ENTISGLS_EMBEDDED)
 #include "platform/android/android_game_files.h"
 #endif
 #endif
@@ -24,7 +24,7 @@ void FileDiagnostics(const char* phase, const wchar_t* path = L"") {
             "phase=%s path=%ls operation=%s calls=%llu bytes=%llu total_ms=%.3f max_all_ms=%.3f",
             phase, path, item.first, static_cast<unsigned long long>(item.second.calls),
             static_cast<unsigned long long>(item.second.bytes), item.second.totalNs / 1e6, item.second.maxNs / 1e6);
-#if defined(__ANDROID__)
+#if defined(__ANDROID__) && !defined(AETHER_ENTISGLS_EMBEDDED)
     study::platform::LogPrint(study::platform::LogPriority::Info, "StartupIO",
         "phase=%s provider=%s", phase, AndroidGameFileDiagnostics().c_str());
 #endif

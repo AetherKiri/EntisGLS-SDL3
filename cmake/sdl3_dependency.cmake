@@ -24,6 +24,23 @@ if(AETHER_ENTISGLS_EMBEDDED)
         add_subdirectory("${source}" "${CMAKE_CURRENT_BINARY_DIR}/embedded-sdl3" EXCLUDE_FROM_ALL)
         set_target_properties(SDL3-static PROPERTIES POSITION_INDEPENDENT_CODE ON
             C_VISIBILITY_PRESET hidden CXX_VISIBILITY_PRESET hidden)
+        if(ANDROID)
+            get_filename_component(embedded_sdl_generator "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../tools/sdk/prepare_embedded_sdl.py" ABSOLUTE)
+            set(embedded_sdl_overlay "${CMAKE_CURRENT_BINARY_DIR}/embedded-sdl-overlay")
+            execute_process(COMMAND "${Python3_EXECUTABLE}" "${embedded_sdl_generator}"
+                --source "${source}" --output "${embedded_sdl_overlay}" COMMAND_ERROR_IS_FATAL ANY)
+            get_target_property(embedded_sdl_sources SDL3-static SOURCES)
+            foreach(relative events/SDL_events.c thread/pthread/SDL_systhread.c stdlib/SDL_getenv.c
+                    io/SDL_iostream.c video/SDL_video.c audio/openslES/SDL_openslES.c
+                    filesystem/android/SDL_sysfilesystem.c filesystem/posix/SDL_sysfsops.c)
+                list(FILTER embedded_sdl_sources EXCLUDE REGEX "(^|/)${relative}$")
+                list(APPEND embedded_sdl_sources "${embedded_sdl_overlay}/${relative}")
+            endforeach()
+            list(FILTER embedded_sdl_sources EXCLUDE REGEX "(^|/)SDL_egl\\.c$")
+            list(APPEND embedded_sdl_sources "${CMAKE_CURRENT_BINARY_DIR}/sdk-sdl/source/SDL_egl.c")
+            set_target_properties(SDL3-static PROPERTIES SOURCES "${embedded_sdl_sources}")
+            target_compile_definitions(SDL3-static PRIVATE AETHER_ENTISGLS_EMBEDDED=1)
+        endif()
         if(APPLE)
             file(GLOB_RECURSE objc_sources "${source}/src/*.m" "${source}/src/*.h")
             set(class_names)

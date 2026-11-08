@@ -32,6 +32,8 @@
 #include <vector>
 #if defined(__APPLE__)
 #include <OpenGL/OpenGL.h>
+#elif defined(__ANDROID__)
+#include <EGL/egl.h>
 #endif
 
 SakuraGL::SGLError sglStaticInitialize() { return SakuraGL::sglErrSuccess; }
@@ -51,6 +53,16 @@ struct HostGraphicsScope {
         if (CGLGetCurrentContext() != previous) {
             if (SDL_GL_GetCurrentContext()) SDL_GL_MakeCurrent(SDL_GL_GetCurrentWindow(), nullptr);
             CGLSetCurrentContext(previous);
+        }
+    }
+#elif defined(__ANDROID__)
+    EGLDisplay display = eglGetCurrentDisplay();
+    EGLContext previous = eglGetCurrentContext();
+    EGLSurface draw = eglGetCurrentSurface(EGL_DRAW), read = eglGetCurrentSurface(EGL_READ);
+    ~HostGraphicsScope() {
+        if (eglGetCurrentContext() != previous) {
+            if (SDL_GL_GetCurrentContext()) SDL_GL_MakeCurrent(SDL_GL_GetCurrentWindow(), nullptr);
+            if (display != EGL_NO_DISPLAY) eglMakeCurrent(display, draw, read, previous);
         }
     }
 #endif
@@ -104,6 +116,12 @@ struct Player {
         SDL_SetMainReady();
         if (!SDL_IsMainThread()) throw std::runtime_error("EntisGLS presentation must start on the host main thread");
         SDL_SetHint(SDL_HINT_MAC_BACKGROUND_APP, "1");
+#if defined(__ANDROID__)
+        // Godot owns the Activity and surface. SDL's Android window and Java
+        // audio backends require an SDLActivity that this host does not have.
+        SDL_SetHintWithPriority(SDL_HINT_VIDEO_DRIVER, "offscreen", SDL_HINT_OVERRIDE);
+        SDL_SetHintWithPriority(SDL_HINT_AUDIO_DRIVER, "openslES", SDL_HINT_OVERRIDE);
+#endif
         if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_AUDIO)) throw std::runtime_error(SDL_GetError());
         video = true;
         platform::ResetRuntimeControl();

@@ -193,7 +193,7 @@ SGLError SGLGenericWindow::CreateWindowSimply(const wchar_t* title, uint32_t wid
             const SDL_WindowFlags flags = embeddedPresentation ? SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN :
                 SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
                 (m_flagFullscreen ? SDL_WINDOW_FULLSCREEN : 0);
-            if (!study::platform::sdl::ApplyMobileGameOrientation(state->orientation, nullptr, width, height)) {
+            if (!embeddedPresentation && !study::platform::sdl::ApplyMobileGameOrientation(state->orientation, nullptr, width, height)) {
                 Trace("SDL game orientation: %s\n", SDL_GetError()); return sglErrFailed;
             }
             state->window = SDL_CreateWindow(caption.c_str(), initialWidth, initialHeight, flags);
@@ -203,7 +203,9 @@ SGLError SGLGenericWindow::CreateWindowSimply(const wchar_t* title, uint32_t wid
                 Trace("SDL GL context: %s\n", SDL_GetError()); SDL_DestroyWindow(state->window);
                 return sglErrFailed;
             }
-            if (!study::platform::sdl::ConfigureImmediatePresentation()) {
+            // Embedded frames are read back before Godot presents them. EGL
+            // pbuffers need no swap interval and may reject eglSwapInterval.
+            if (!embeddedPresentation && !study::platform::sdl::ConfigureImmediatePresentation()) {
                 Trace("SDL immediate presentation unavailable: %s\n", SDL_GetError());
                 SDL_GL_DestroyContext(state->context); SDL_DestroyWindow(state->window);
                 return sglErrFailed;
@@ -213,7 +215,7 @@ SGLError SGLGenericWindow::CreateWindowSimply(const wchar_t* title, uint32_t wid
                 SDL_GL_DestroyContext(state->context); SDL_DestroyWindow(state->window); return sglErrFailed;
             }
             state->glLease = study::platform::sdl::RegisterGlWindow(state->window, state->context);
-            if (!study::platform::sdl::ApplyMobileGameOrientation(state->orientation, state->window, width, height))
+            if (!embeddedPresentation && !study::platform::sdl::ApplyMobileGameOrientation(state->orientation, state->window, width, height))
                 Trace("SDL game orientation refresh: %s\n", SDL_GetError());
             m_sizePhysicalDisplay = SGLSize(pixelWidth, pixelHeight);
             m_rectWindow = SGLImageRect(0, 0, pixelWidth, pixelHeight);
@@ -334,7 +336,7 @@ SGLError SGLGenericWindow::ChangeDisplaySize(uint32_t width, uint32_t height,
                 m_sizeVirtual = SGLSize(width, height);
                 m_sizeLayoutOriginal = m_sizeVirtual;
                 m_nBitsPerPixel = depth; m_nFrequency = frequency;
-                if (!study::platform::sdl::ApplyMobileGameOrientation(state->orientation, state->window, width, height))
+                if (!embeddedPresentation && !study::platform::sdl::ApplyMobileGameOrientation(state->orientation, state->window, width, height))
                     Trace("SDL changed game orientation: %s\n", SDL_GetError());
                 UpdateWindowLayout();
                 PostUpdate();

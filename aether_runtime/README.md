@@ -98,6 +98,8 @@ schemes, reopen the SDK, switch games and change cache directories. Tests includ
 Unicode game paths. The default build includes all registered test executables;
 `AETHERKIRI_BUILD_ENTISGLS_TESTS=OFF` excludes them from product-only builds.
 
+Android builds also provide the opt-in `aether_entisgls_android_host_test` target. Push its executable to a device and run it with `adb shell` to check initialization without a JVM or SDLActivity, offscreen GLES readback, POSIX file access, event delivery, OpenSL ES audio and repeated startup. The embedded Android provider uses these native services while the host supplies input, lifecycle, orientation and game/cache paths.
+
 `.github/workflows/aether.yml` runs standalone tests on macOS and Linux without
 private credentials. Game-specific JSON probes are local development artifacts
 and are not part of this integration package.

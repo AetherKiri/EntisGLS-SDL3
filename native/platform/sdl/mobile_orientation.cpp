@@ -1,6 +1,6 @@
 #include "platform/sdl/mobile_orientation.h"
 #include <SDL3/SDL.h>
-#if defined(SDL_PLATFORM_ANDROID)
+#if defined(SDL_PLATFORM_ANDROID) && !defined(AETHER_ENTISGLS_EMBEDDED)
 #include <jni.h>
 #elif defined(SDL_PLATFORM_IOS)
 #include "platform/ios/window_orientation.h"
@@ -38,7 +38,11 @@ void GameOrientationHintScope::Restore() {
 namespace {
 bool RefreshOrientation(SDL_Window* window, std::uint32_t width, std::uint32_t height) {
     if (!window) return true;
-#if defined(SDL_PLATFORM_ANDROID)
+#if defined(SDL_PLATFORM_ANDROID) && defined(AETHER_ENTISGLS_EMBEDDED)
+    // The host owns Activity orientation; this window is an offscreen pbuffer.
+    (void)width; (void)height;
+    return true;
+#elif defined(SDL_PLATFORM_ANDROID)
     // SDL has no orientation-update API or hint callback on Android. Dispatch
     // the same public SDLActivity method used by SDL's own CreateWindow path.
     auto* env = static_cast<JNIEnv*>(SDL_GetAndroidJNIEnv());

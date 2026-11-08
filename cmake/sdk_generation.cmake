@@ -11,6 +11,9 @@ function(entis_track_sdk_generation)
         "${_entis_root}/native/runtime/cotopha_port/*.inc"
         "${_entis_root}/native/platform/sdl/*.inc"
         "${_entis_root}/vendor/official-loquaty/Loquaty/source/loquaty_file.cpp"
+        "${_entis_root}/vendor/official-loquaty/Loquaty/source/loquaty_cls_clock.cpp"
+        "${_entis_root}/vendor/official-loquaty/Loquaty/source/loquaty_date_time.cpp"
+        "${_entis_root}/vendor/sdl3/src/video/SDL_egl.c"
         "${ENTIS_ROOT}/Include/*.h" "${ENTIS_ROOT}/Source/*.cpp"
         "${LEGACY_ROOT}/*.h" "${LEGACY_ROOT}/*.cpp")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
