@@ -1,6 +1,6 @@
 # EntisGLS 启动配置
 
-启动器从所选游戏目录读取配置，当前执行的是**传统 Cotopha `ECSContext` 的 `.csx` 映像**。EntisGLS 名称覆盖多个时期的运行时；`.lqs` / Loquaty 应用以及需要额外 Windows DLL 的游戏目前不在此入口的支持范围。能够解析配置并不等于所有游戏的 Native 接口都已实现。
+启动器从所选游戏目录读取配置，支持**传统 Cotopha `ECSContext` 的 `.csx` 映像**，以及下述 WitchWizard 原生应用的基础剧情入口。EntisGLS 名称覆盖多个时期的运行时；`.lqs` / Loquaty 应用以及需要额外 Windows DLL 的游戏目前不在此入口的支持范围。能够解析配置并不等于所有游戏的 Native 接口都已实现。
 
 ## 配置发现顺序
 
@@ -14,7 +14,17 @@ EXE 只作为数据文件读取，不运行 Windows 代码。读取器支持 PE3
 
 如果多个 EXE 都带启动配置，会要求明确选择。明确指定的 `--config` 或已找到的 XML 配置发生错误时会直接报告；不会用推测配置掩盖错误、绕过不支持的运行时或忽略不支持的 DLL。
 
-原生 EntisGLS 应用也可能包含 `IDR_COTOMI` 和 `<script>` 环境配置，但不声明 `src`。这对原引擎不一定是错误：程序可能由 Windows EXE 中的原生入口或其他脚本运行时启动。当前启动器会明确报告缺少 Cotopha `.csx` 入口；不能通过随意填写 `script.csx` 让这类应用运行，必须有真实可执行的 CSX 映像以及相应接口支持。
+原生 EntisGLS 应用也可能包含 `IDR_COTOMI` 和 `<script>` 环境配置，但不声明 `src`。这对原引擎不一定是错误：程序可能由 Windows EXE 中的原生入口或其他脚本运行时启动。启动器仅在配置声明的 NOA 归档中找到带有 `xscript/code` 结构的 `main.srcxml` 时选择 WitchWizard 执行器；其他原生应用仍报告缺少受支持入口。不能通过随意填写 `script.csx` 让原生应用运行。
+
+### WitchWizard 基础剧情入口
+
+此入口复用公共 SDL SDK 的 NOA、ERI、MIO 和 `wm_title.noa` / `wm_window.noa` 皮肤，解释原生应用的 `.srcxml`。它与 Cotopha CSX VM 分开，不修改游戏脚本或执行 EXE。当前覆盖标题、新游戏、消息推进、调用和条件选择、背景/立绘/声音、常用移动/震动/滤镜、历史文字与语音、手动存读档和返回标题。
+
+这是基础剧情支持，不表示完整复现原生 EXE。原生鉴赏/回想表、配置页、结局播放器尚未接入，相应未实现的入口按钮保持禁用；专用转场目前采用透明度过渡，文字直接呈现。未知剧情指令报告标签与脚本位置，不伪装为执行成功。后续扩展集中在 `native/runtime/witch`；解释器不依赖 UI，可用合成脚本独立测试。
+
+存档写入游戏目录 `savedata/witch-slot-N.json`（含调用栈、变量、场景、循环声音、当前文字、历史及缩略图），通过临时文件原子替换。它是 Aether 的存档格式，不能导入 Windows 原生存档，不改写原生 `adv.profile`。读取后从已显示消息的下一条指令继续。macOS/iOS 宿主字体用于缺失字体回退，不随引擎打包商业游戏字库。
+
+回归测试 `entisgls-witch-script` 验证控制流、表达式、选择、调用栈存读档和执行边界；`entisgls-witch-sdk` 验证 XML、补充 Unicode 字符和销毁界面时的渲染重入。配置测试覆盖原始/ERISAN 条目以及误识别拒绝。实际游戏画面和存读档另用宿主 JSON probe 验证，不将游戏资源或存档纳入仓库。
 
 ### 缺少配置时从归档尝试启动
 

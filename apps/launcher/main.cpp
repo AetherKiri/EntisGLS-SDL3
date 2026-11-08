@@ -360,6 +360,10 @@ static int RunApplication(int argc, char** argv) {
             ReadAsset(paths.assetsRoot, "compatibility/study-steady-r18.xml"), "verified study-steady-r18 compatibility template");
     }
     if (knownStudySteady && game.compatibilityProfile.empty()) game.compatibilityProfile = "study-steady-r18";
+    if (game.runtime == entis::launcher::GameLaunchConfig::Runtime::WitchWizard) {
+        const auto fallback = fs::u8path(paths.assetsRoot) / "fonts" / "NotoSerifCJKtc-Bold.otf";
+        if (entis::io::Stat(fallback).kind == entis::io::FileInfo::Kind::File) game.fallbackFont = fallback.u8string();
+    }
     if (knownStudySteady && game.compatibilityProfile == "study-steady-r18" && !game.explicitGameId) game.gameId = "study-steady-r18";
     paths.localRoot = (applicationData / "games" / game.gameId).string();
     SDL_Log("Game: %s; id=%s; entry=%s; profile=%s; source=%s; saves=%s/savedata",

@@ -656,6 +656,8 @@ bool CheckLegacyMessage() {
     };
     draw();
     if(!check(!native.HasUpdate()&&!hasInk(),"initial empty framebuffer is clean"))return false;
+    if(!check(!native.OnLButtonDown(4,4,0)&&!native.OnLButtonUp(4,4,0),
+        "clicking an empty message passes through without a link"))return false;
     size_t consumed=0;
     const wchar_t text[]=L"日本語\\n:試験\\r;漢字;かんじ:";
     if(!check(!sprite.OutputMessage(text,consumed) && consumed==std::wcslen(text),"Japanese text, newline and ruby formatting")) return false;
@@ -674,6 +676,9 @@ bool CheckLegacyMessage() {
     native.AdvanceTime(10000);
     if(!check(!native.IsMessagePending(),"AdvanceTime finishes typewriter")) return false;
     draw();if(!check(hasInk(),"glyph pixels refresh a previously clean local framebuffer"))return false;
+    native.OnMouseMove(4,4,0);
+    if(!check(!native.OnLButtonDown(4,4,0)&&!native.OnLButtonUp(4,4,0),
+        "clicking ordinary dialogue passes through without a link"))return false;
     if(!check(!sprite.OutputMessage(L"終",consumed) && native.IsMessagePending(),"append starts new timing")) return false;
     native.FlushMessage();
     if(!check(!native.IsMessagePending(),"FlushMessage")) return false;
@@ -682,6 +687,25 @@ bool CheckLegacyMessage() {
     draw();if(!check(!hasInk(),"native ClearMessage removes previously rendered framebuffer ink"))return false;
     if(!check(!sprite.OutputMessage(L"再",consumed),"output after clean clear"))return false;
     native.FlushMessage();draw();if(!check(hasInk(),"native FlushMessage repaints timed glyphs without AdvanceTime"))return false;
+    native.ClearMessage();
+    // An empty href keeps this real hyperlink fixture entirely local.
+    native.AddMessageXML(L"<a>link</a>");native.FlushMessage();
+    auto* character=native.GetMessageCharacterAt(0);
+    auto* link=character?character->m_pLink:nullptr;
+    if(!check(link&&link->m_aHitRects.GetLength(),"real hyperlink hit rectangles"))return false;
+    const auto rect=link->m_aHitRects.GetConstArray()[0];
+    const auto x=(rect.left+rect.right)/2,y=(rect.top+rect.bottom)/2;
+    native.OnMouseMove(x,y,0);
+    if(!check(native.OnLButtonDown(x,y,0)&&native.OnLButtonUp(x,y,0)&&
+        link->m_status==SGLSpriteMessage::LinkInfo::statusFocus,
+        "hyperlink press and release still work"))return false;
+    native.OnMouseLeave(0);
+    if(!check(!native.OnLButtonDown(-100,-100,0)&&!native.OnLButtonUp(-100,-100,0),
+        "clicking outside an existing hyperlink passes through"))return false;
+    native.ClearMessage();
+    constexpr auto touch=SGLMouseInterface::TouchFlag;
+    if(!check(!native.OnLButtonDown(x,y,touch)&&!native.OnLButtonUp(x,y,touch),
+        "touching a cleared hyperlink passes through"))return false;
     study::platform::LogWrite(study::platform::LogPriority::Info,"StudySteady","Legacy MessageSprite probe PASS: font rasterization, Japanese/ruby/newline, timed display, flush/clear");
     return true;
 }

@@ -23,9 +23,12 @@ struct FontAlias {
 };
 
 struct GameLaunchConfig {
+    enum class Runtime { Cotopha, WitchWizard };
+    Runtime runtime = Runtime::Cotopha;
     // Optional host-owned, read-only resource layer. Never used for saves.
     std::shared_ptr<SSystem::SFileOpener> resourceOverrides;
     std::string fontOverride;
+    std::string fallbackFont; // Optional host-packaged face for absent system fonts.
     std::string normalizedXml;
     std::string entryScript;
     std::string title;
@@ -56,7 +59,7 @@ public:
 // explicitConfig, entis-launcher.xml, cotopha.xml, then one EXE IDR_COTOMI
 // (including intact PEs in its overlay), then verified script.noa/script.csx.
 // explicitConfig may name XML or an EXE inside gameDir. This discovers legacy
-// Cotopha .csx applications; other VM formats are reported as unsupported.
+// Cotopha .csx and positively identified native WitchWizard xscript applications.
 // Safe before SDK/SDL initialization; uses the SDK's standalone ERISAN decoder
 // and a bounded XML subset, without starting the VM or graphics.
 GameLaunchConfig DiscoverGame(const std::filesystem::path& gameDir,
