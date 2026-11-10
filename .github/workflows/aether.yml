@@ -42,6 +42,7 @@ jobs:
           sparse-checkout: |
             abi/include
             bridge/game_hooks
+            apps/godot_app/assets/fonts
       - name: Install EntisGLS test dependencies
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
