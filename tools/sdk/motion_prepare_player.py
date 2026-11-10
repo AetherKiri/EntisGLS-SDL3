@@ -278,9 +278,8 @@ bool Player::loadKrkrAtlasSource_guess(detail::MotionNode::SourceState &, Resour
         'void appendD3DMesh_guess(', 'bool shouldSkipD3DRenderItem_guess('])
     render = render.replace('(void)TVPShowSimpleMessageBox(message, caption);', 'throw std::runtime_error("Motion stencil reference overflow");')
     render += '\n}\n'
-    routine = extract(targets, 'void Player::renderPreparedItemsToD3DTexture_guess(\n        iTVPTexture2D *targetTexture,')
-    routine = routine.replace('void Player::renderPreparedItemsToD3DTexture_guess(', 'void renderSceneItems(bool priorDraw,')
-    routine = routine.replace('_priorDraw','priorDraw').replace('motion::render_backend_guess', '::motion::render_backend_guess')
+    render = '#include "platform/gl.h"\n' + render
+    routine = (ROOT / 'native/extensions/emote/tjs_runtime/gles_scene_items.inc').read_text()
     render += routine + '\n}\n'
     # In this adapter's enclosing namespace, explicitly qualify original
     # motion::detail/render_backend names rather than changing their types.

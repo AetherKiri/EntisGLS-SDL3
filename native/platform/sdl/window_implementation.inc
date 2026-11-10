@@ -7,6 +7,7 @@
 #include "platform/sdl/gl_drawable.h"
 #include "platform/sdl/mobile_orientation.h"
 #include "platform/sdl/system.h"
+#include "platform/sdl/mutex_unlock.h"
 #include <algorithm>
 #include <cmath>
 #include <deque>
@@ -72,7 +73,7 @@ template<class Work> auto WindowUnlocked(SSystem::SMutex* mutex, Work&& work) ->
     if (SDL_IsMainThread()) return std::forward<Work>(work)();
     // Rendering callbacks need this same recursive UI lock. Never wait on the
     // main thread while retaining it on a script/media worker.
-    const auto locks = mutex ? mutex->UnlockAll() : 0;
+    const auto locks = study::platform::sdl::UnlockAllMutex(mutex);
     const auto systemLocks = SSystem::UnlockAll();
     struct Restore {SSystem::SMutex* mutex; atomic_int_t locks, systemLocks;
         ~Restore() {SSystem::Relock(systemLocks); if (mutex) mutex->Relock(locks);}} restore{mutex, locks, systemLocks};

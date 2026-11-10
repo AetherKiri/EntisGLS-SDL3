@@ -128,7 +128,7 @@ struct Player {
         platform::SetRuntimePaused(paused);
         studysteady::platform::SetSdlRuntimeAudioPaused(paused);
         ConfigureGameStorage(root, cache);
-        if (const auto* base = SDL_GetBasePath(); base && config.runtime == entis::launcher::GameLaunchConfig::Runtime::WitchWizard) {
+        if (const auto* base = SDL_GetBasePath(); base) {
             for (const auto& relative : {"fonts/default.otf", "default.otf"}) {
                 const auto path = fs::u8path(base) / relative;
                 if (fs::is_regular_file(path)) { config.fallbackFont = path.u8string(); break; }
@@ -323,6 +323,7 @@ engine_result_t debug(void* opaque, char* output, uint32_t size, uint32_t* writt
             {"frame_serial", p.serial}, {"width", p.width}, {"height", p.height},
             {"input_events", p.inputs}, {"error", p.error}, {"visible_message_characters", 0}};
         data["save_directory"]=(p.root/"savedata").u8string();
+        data["font_smoothing"] = platform::IsFontSmoothingEnabled();
         if (p.config.runtime == entis::launcher::GameLaunchConfig::Runtime::WitchWizard) {
             const auto state = entis::witch::Snapshot();
             data["witch"] = state.is_object() ? state : nlohmann::json::object();

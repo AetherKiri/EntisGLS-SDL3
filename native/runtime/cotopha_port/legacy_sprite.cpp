@@ -91,8 +91,10 @@ SakuraGL::SGLImageObject* ECSSprite::GetImage() const {
 ESLError ECSSprite::ReadImageFile(ESLFileObject &file) {
     GraphicsLock lock;
     const auto error = ECSResource::ReadImageFile(file);
-    if (!error) sprite_->AttachImage(GetImage());
-    return error;
+    if (error) return error;
+    // GLS3 LoadImage creates an animation object even for a single frame.
+    // Plain AttachImage loses the playback state used by script cleanup.
+    return AttachLegacySpriteAnimation(*this, *GetImage());
 }
 ESLError ECSSprite::Release() {
     ResetLegacySpriteDrawState(*this,true);

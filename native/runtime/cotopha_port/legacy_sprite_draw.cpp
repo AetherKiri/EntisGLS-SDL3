@@ -407,6 +407,18 @@ void ResetLegacySpriteDrawState(ECSSprite &sprite,bool preserveTone) {
         state.alphaFilter=filter;sprite.NativeSprite().AddSmartFilter(filter);
     }
 }
+ESLError AttachLegacySpriteAnimation(ECSSprite& object, SGLImageObject& image) {
+    GraphicsGuard lock;
+    std::unique_ptr<SGLImageObject> view(image.NewReference(nullptr, -1));
+    if (!view) return eslErrGeneral;
+    auto& state = State(object);
+    state.attachedImage = std::move(view);
+    auto* animator = new LegacyAnimator;
+    animator->AttachImage(state.attachedImage.get());
+    state.animator = animator;
+    object.NativeSprite().SetSpriteImager(animator);
+    return animator->Start(object.NativeSprite(), -1, 0, -1, 0, -1);
+}
 void SetLegacySpriteBlendEffect(ECSSprite& object,std::shared_ptr<LegacySpriteBlendEffect> effect) {
     GraphicsGuard lock;auto& state=State(object);
     if(state.blendEffect)state.blendDegree=state.blendEffect->GetDegree();

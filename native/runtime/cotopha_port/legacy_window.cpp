@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cwchar>
 #include <thread>
+#include <future>
 
 IMPLEMENT_CLASS_INFO(ECSWindow, ECSSprite)
 namespace {
@@ -445,6 +446,14 @@ bool ECSWindow::NotifyCommand(const wchar_t *id, int64_t notification,
     return false;
 }
 ESLError ECSWindow::GetCommand(ECSContext &context, Command &cmd, int64_t timeout, bool remove) {
+    // Script execution may hold the same recursive lock used by the host's
+    // input dispatch, rendering and debug snapshots. Waiting with it held
+    // prevents those producers from ever delivering the awaited command.
+    struct RestoreGraphicsLock {
+        atomic_int_t depth = SSystem::TestLocked() ? SSystem::UnlockAll() : 0;
+        ~RestoreGraphicsLock() { SSystem::Relock(depth); }
+    } restore;
+    // Destroy the queue lock before reacquiring the graphics lock.
     std::unique_lock<std::mutex> guard(queueMutex_);
     const auto until = Clock::now() + std::chrono::milliseconds(timeout < 0 ? INT32_MAX : timeout);
     while (commands_.empty()) {
@@ -712,6 +721,38 @@ bool CheckLegacyWindowCommandQueue() {
         study::platform::LogPrint(value?study::platform::LogPriority::Debug:study::platform::LogPriority::Error,"StudySteady",
             "Legacy Window command probe %s: %s",value?"OK":"FAIL",stage);return value;
     };
+    {
+        ECSWindow waiting;
+        waiting.closed_ = false;
+        std::promise<void> locked;
+        auto started = locked.get_future();
+        ESLError status = eslErrGeneral;
+        atomic_int_t restoredDepth = 0;
+        ECSWindow::Command received;
+        std::thread script([&] {
+            ECSContext context;
+            context.SetStatus(ECSContext::xsExecution);
+            SSystem::Lock(); SSystem::Lock();
+            locked.set_value();
+            status = waiting.GetCommand(context, received, 1000, true);
+            restoredDepth = SSystem::UnlockAll();
+        });
+        started.wait();
+        const bool canDispatch = SSystem::Lock(500) == SSystem::errSuccess;
+        if (canDispatch) {
+            waiting.QueueCommand(L"ID_WAIT_INPUT");
+            SSystem::Unlock();
+        }
+        script.join();
+        if (!check(canDispatch && !status && received.id == L"ID_WAIT_INPUT" && restoredDepth == 2,
+            "waiting for input yields the recursive graphics lock to host input/render/debug and restores its depth")) return false;
+        ECSContext context; context.SetStatus(ECSContext::xsExecution);
+        SSystem::Lock(); SSystem::Lock();
+        status = waiting.GetCommand(context, received, 0, true);
+        restoredDepth = SSystem::UnlockAll();
+        if (!check(status == eslErrTimeout && restoredDepth == 2,
+            "an empty nonblocking input poll also preserves the caller's recursive lock depth")) return false;
+    }
     {
         ECSWindow frozen;
         auto& bridge = *frozen.window_;

@@ -89,12 +89,21 @@ if(AETHERKIRI_BUILD_ENTISGLS_TESTS)
     target_compile_features(aether_entisgls_adaptation_test PRIVATE cxx_std_17)
     target_include_directories(aether_entisgls_adaptation_test PRIVATE src "${AETHER_ENTISGLS_HOST_ROOT}/abi/include")
     target_link_libraries(aether_entisgls_adaptation_test PRIVATE legacy_objects legacy_foundation gls4_sdl motion_apk_runtime freetype aether_game_hooks nlohmann_json::nlohmann_json)
-    foreach(mode encoding input button-status graphics image-cache camera-cache control audio fonts serialization game-hooks witch-sdk)
+    foreach(mode encoding input button-status edit-options graphics image-cache camera-cache control audio fonts serialization game-hooks witch-sdk legacy-bshf)
         add_test(NAME entisgls-${mode} COMMAND aether_entisgls_adaptation_test ${mode} "${CMAKE_CURRENT_BINARY_DIR}/adaptation-${mode}")
     endforeach()
     add_test(NAME entisgls-configuration COMMAND launcher_config_test "${CMAKE_CURRENT_BINARY_DIR}/config-fixtures")
     add_test(NAME entisgls-speech-capabilities COMMAND legacy_speech_test)
     add_test(NAME entisgls-font-enumeration COMMAND legacy_setup_fonts_test)
+    add_test(NAME entisgls-font-rasterization COMMAND launcher_fonts_test
+        "${CMAKE_CURRENT_BINARY_DIR}/font-raster-fixture"
+        "${AETHER_ENTISGLS_HOST_ROOT}/apps/godot_app/assets/fonts/aetherkiri-ui.ttf")
+    add_executable(aether_entisgls_motion_masks_test EXCLUDE_FROM_ALL tests/motion_masks_test.cpp)
+    target_link_libraries(aether_entisgls_motion_masks_test PRIVATE motion_apk_runtime SDL3::SDL3)
+    add_test(NAME entisgls-motion-masks COMMAND aether_entisgls_motion_masks_test)
+    add_executable(aether_entisgls_motion_timeline_test EXCLUDE_FROM_ALL tests/motion_timeline_test.cpp)
+    target_link_libraries(aether_entisgls_motion_timeline_test PRIVATE motion_apk_runtime)
+    add_test(NAME entisgls-motion-timelines COMMAND aether_entisgls_motion_timeline_test)
     add_test(NAME entisgls-emote-save-abi COMMAND legacy_emote_api_test)
     add_test(NAME entisgls-atlas-projection COMMAND motion_atlas_projection_test)
     add_test(NAME entisgls-psb-key-resolver COMMAND psb_key_resolver_test)
@@ -109,11 +118,13 @@ if(AETHERKIRI_BUILD_ENTISGLS_TESTS)
     get_property(entis_tests DIRECTORY PROPERTY TESTS)
     set_tests_properties(${entis_tests} PROPERTIES TIMEOUT 60
         ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
+    set_tests_properties(entisgls-motion-masks PROPERTIES
+        ENVIRONMENT "SDL_AUDIODRIVER=dummy" SKIP_RETURN_CODE 77 LABELS "gpu")
     # Integrated CI builds the default target before running the full CTest
     # inventory. Include every registered executable when tests are enabled.
     add_custom_target(aether_entisgls_tests ALL DEPENDS launcher_config_test legacy_speech_test aether_entisgls_witch_test
         aether_entisgls_adaptation_test aether_entisgls_provider_test aether_entisgls_storage_test
-        legacy_setup_fonts_test legacy_emote_api_test motion_atlas_projection_test
+        legacy_setup_fonts_test launcher_fonts_test aether_entisgls_motion_masks_test aether_entisgls_motion_timeline_test legacy_emote_api_test motion_atlas_projection_test
         psb_key_resolver_test psb_key_settings_test game_save_directory_test legacy_atomic_path_test
         sdl_system_test mobile_orientation_test make_csx_fixture)
 endif()

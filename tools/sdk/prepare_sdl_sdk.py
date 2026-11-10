@@ -70,7 +70,15 @@ def main():
 {
     SGLFontStyle style(requested);
     const auto selected = study::platform::sdl::FontOverride();
+    const auto fallback = study::platform::sdl::FontFallback();
     if (!selected.empty()) style.pszFace = selected.c_str();''')
+        lookup = 'SGLFontObject *\tpFont = m_pFontStock->GetAs( style.pszFace ) ;'
+        if s.count(lookup) != 1: raise ValueError('SDK font stock lookup changed')
+        s = s.replace(lookup, lookup + '''
+        if (!pFont && !fallback.empty()) {
+            pFont = m_pFontStock->GetAs(fallback.c_str());
+            if (pFont) style.pszFace = fallback.c_str();
+        }''')
         constructor = 'SGLFont::SGLFont( void )\n{\n\tm_pFont = NULL ;\n}'
         if s.count(constructor) != 1: raise ValueError('SDK default font constructor changed')
         s = s.replace(constructor, 'SGLFont::SGLFont( void )\n{\n\tm_pFont = NULL ;\n\tm_flagOwner = false ;\n}')
@@ -85,6 +93,49 @@ def main():
         # not fall through into the second unlock and a missing system backend.
         return s.replace(old, old + '\n\t\t\treturn sglErrFailed;')
     source_copy('Source/common/sakuragl/sgl2d/sgl_font.cpp', font)
+    def fixed_pitch_lettering(s):
+        # Fixed character advance changes width, not the glyph cell height.
+        # The SDK skipped that height calculation and pushed narrow name text
+        # below its canvas when pitchChar was nonzero.
+        old = '''\telse if ( !flagVertical )
+\t{
+\t\tfor ( i = 0; i < nCount; i ++ )'''
+        if s.count(old) != 1:
+            raise ValueError('SDK fixed-pitch lettering branch changed')
+        s = s.replace(old, old.replace('else if', 'if'))
+        for dimension in ('w', 'h'):
+            old = f'\t\t\twidthChars += pChar->sizeChar.{dimension} ;'
+            if s.count(old) != 1:
+                raise ValueError('SDK lettering width calculation changed')
+            s = s.replace(old, '\t\t\tif ( context.pitchChar == 0 )\n' + old)
+        # Without a border pBufLetter is still empty here. Seed the shadow
+        # mask from the glyph, otherwise enabling shadow alone paints nothing.
+        old = '\t\tsglMultiplierBlendImageBuffer( *(imgShadow.GetImage()), *pBufLetter ) ;'
+        if s.count(old) != 1:
+            raise ValueError('SDK lettering shadow mask changed')
+        s = s.replace(old, '''        if (deco.nFlags & flagBorder) {
+            sglMultiplierBlendImageBuffer(*(imgShadow.GetImage()), *pBufLetter);
+        } else {
+            SGLSmartImage shadowMask;
+            shadowMask.CreateBuffer(infLetter);
+            sglAdditionalBlendImageBuffer(*shadowMask.GetImage(), *pCharShape,
+                -rectExLetter.left, -rectExLetter.top);
+            sglMultiplierBlendImageBuffer(*imgShadow.GetImage(), *shadowMask.GetImage());
+        }''')
+        return s
+    source_copy('Source/common/sakuragl/sgl2d/sgl_lettering.cpp', fixed_pitch_lettering)
+    def legacy_archive(s):
+        start = s.index('SSystem::SError SGLArchiveFile::PrepareDecoder')
+        entry = '\tif ( pfeEntry->nEncodeType == encodeERISA )'
+        at = s.index(entry, start)
+        s = s[:at] + '''    if (pfeEntry->nEncodeType == 0x40000000) {
+        m_pInCRC32 = study::platform::sdl::CreateLegacyBshfDecoder(
+            pStream, pfeEntry->nBytes, pwszPassword);
+        return m_pInCRC32 != nullptr ? errSuccess : errFailed;
+    }
+''' + s[at:]
+        return '#include "platform/sdl/legacy_bshf.h"\n' + s
+    source_copy('Source/common/sakuragl/erisa/sgl_erisa_archive_file.cpp', legacy_archive)
     def button_notifications(s):
         old = '\t\t\t\t\t\tm_statusButton, commandNormal, true ) ;'
         if s.count(old) != 1:
@@ -95,6 +146,14 @@ def main():
                 s.replace(old, '\t\t\t\t\t\tTranslateLegacyButtonStatusNotification( pParent, m_statusButton ),\n'
                                '\t\t\t\t\t\tcommandNormal, true ) ;'))
     source_copy('Source/common/sakuraglx/sprite/sglx_sprite_button.cpp', button_notifications)
+    def edit_options(s):
+        old = 'for ( size_t i = 0; pwszAcceptIDs[i]; i ++ )'
+        if s.count(old) != 1:
+            raise ValueError('SDK edit acceptance option table changed')
+        # Unlike the deny table, the accept table has no null terminator.
+        # Stay within both parallel arrays even for unrecognized keywords.
+        return s.replace(old, 'for ( size_t i = 0; i < sizeof(pwszAcceptIDs) / sizeof(pwszAcceptIDs[0]); i ++ )')
+    source_copy('Source/common/sakuraglx/sprite/sglx_sprite_edit.cpp', edit_options)
     def message_link_input(s):
         old = '\tif ( m_pFocusLink == pHitLink )'
         if s.count(old) != 2:

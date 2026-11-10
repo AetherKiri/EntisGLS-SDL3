@@ -1,5 +1,6 @@
 #include "compatibility/sdk/legacy/gls.h"
 #include "launcher/runtime_session.h"
+#include "launcher/runtime_graphics_locks.h"
 #if defined(ENTISGLS_BUILD_DIAGNOSTICS)
 #include "../../tests/probes/cotopha/legacy_file_probe.h"
 #include "../../tests/probes/cotopha/legacy_core_probe.h"
@@ -69,9 +70,12 @@ std::wstring Wide(const std::string& text) {
 #endif
 
 struct RuntimeScope {
+    entis::launcher::RuntimeGraphicsLocks graphicsLocks;
     RuntimeScope() {
 #if defined(STUDYSTEADY_PLATFORM_SDL3)
         study::platform::sdl::SetFontOverride({});
+        study::platform::sdl::SetFontFallback({});
+        study::platform::sdl::SetFontSmoothingEnabled(true);
 #endif
         ECotophaScript::Initialize(0);
         ECotophaScript::MultithreadReference(true);
@@ -80,6 +84,7 @@ struct RuntimeScope {
         ECotophaScript::Release();
 #if defined(STUDYSTEADY_PLATFORM_SDL3)
         study::platform::sdl::SetFontOverride({});
+        study::platform::sdl::SetFontFallback({});
 #endif
     }
 };
@@ -128,6 +133,7 @@ int RunLegacyGame(const wchar_t *arguments, const entis::launcher::GameLaunchCon
         const auto registered = RegisterOpenTypeFont(Wide(launch->fallbackFont), {},
             [&](const wchar_t* path) { return environment.NewOpenFile(path, SSystem::SFileOpener::shareRead); }, L"@aether:default");
         if (!registered.loaded) return Fail(38, "Cannot load the host fallback font: " + registered.error);
+        SetFontFallback(registered.registeredName);
     }
     if (!launch->fontOverride.empty()) {
         const auto registered = RegisterOpenTypeFont(Wide(launch->fontOverride), {},

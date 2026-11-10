@@ -1,5 +1,6 @@
 #include "platform/sdl/opentype_font.h"
 #include "platform/sdl/game_font_aliases.h"
+#include "platform/sdl/system.h"
 #include "platform/log.h"
 #include <sakuragl/sakuragl.h>
 #include <sakuragl/sgl2d/sgl_font.h>
@@ -68,16 +69,8 @@ public:
             }
         }
         flags_ = style.nStyles;
-        sampleScale_ = (flags_ & SGLFontStyle::styleHighDefinition) &&
-            !(flags_ & SGLFontStyle::styleNoSmooth) ? 2 : 1;
-        // The SDK's Windows font uses positive LOGFONT.lfHeight, a character
-        // cell height including ascent/descent, not an em-square pixel size.
-        // REAL_DIM preserves that convention, including the top-of-cell origin
-        // used by SGLLetterer: exterior.y = ascent - glyph bitmap_top.
-        FT_Size_RequestRec request{};
-        request.type = FT_SIZE_REQUEST_TYPE_REAL_DIM;
-        request.height = static_cast<FT_Long>(style.nSize) * sampleScale_ * 64;
-        if (FT_Request_Size(face_, &request)) return sglErrFailed;
+        size_ = style.nSize;
+        if (ConfigureRasterization() != sglErrSuccess) return sglErrFailed;
         configured_ = true;
         return sglErrSuccess;
     }
@@ -88,6 +81,8 @@ public:
         if (!configured_) return sglErrFailed;
         if (character > 0x10ffff || (character >= 0xd800 && character <= 0xdfff))
             return sglErrInvalidParam;
+        if (smoothing_ != WantsSmoothing() && ConfigureRasterization() != sglErrSuccess)
+            return sglErrFailed;
         try {
             if (!cached_ || character != cachedCharacter_) {
                 cached_ = false;
@@ -108,10 +103,26 @@ public:
     bool IsBoldFace() const { return face_ && (face_->style_flags & FT_STYLE_FLAG_BOLD); }
 
 private:
+    bool WantsSmoothing() const {
+        return IsFontSmoothingEnabled() && !(flags_ & SGLFontStyle::styleNoSmooth);
+    }
+    SGLError ConfigureRasterization() {
+        const bool smoothing = WantsSmoothing();
+        const int scale = smoothing && (flags_ & SGLFontStyle::styleHighDefinition) ? 2 : 1;
+        // Match the Windows character-cell height rather than em-square size.
+        FT_Size_RequestRec request{};
+        request.type = FT_SIZE_REQUEST_TYPE_REAL_DIM;
+        request.height = static_cast<FT_Long>(size_) * scale * 64;
+        if (FT_Request_Size(face_, &request)) return sglErrFailed;
+        smoothing_ = smoothing;
+        sampleScale_ = scale;
+        cached_ = false;
+        return sglErrSuccess;
+    }
     SGLError Render(uint32_t character) {
         const auto index = FT_Get_Char_Index(face_, character);
         if (!index) return sglErrFailed; // Do not silently paint .notdef as a real character.
-        const bool monochrome = (flags_ & SGLFontStyle::styleNoSmooth) != 0;
+        const bool monochrome = !smoothing_;
         const auto loadFlags = FT_LOAD_NO_BITMAP |
             (monochrome ? FT_LOAD_TARGET_MONO : FT_LOAD_TARGET_NORMAL);
         if (FT_Load_Glyph(face_, index, loadFlags)) return sglErrFailed;
@@ -180,8 +191,8 @@ private:
     FT_Library library_ = nullptr;
     FT_Face face_ = nullptr;
     std::mutex mutex_;
-    bool configured_ = false, cached_ = false;
-    uint32_t flags_ = 0, cachedCharacter_ = 0;
+    bool configured_ = false, cached_ = false, smoothing_ = true;
+    uint32_t flags_ = 0, cachedCharacter_ = 0, size_ = 0;
     int sampleScale_ = 1;
     SGLFontMetrics metrics_{};
     std::vector<uint8_t> pixels_;

@@ -155,8 +155,19 @@ for component in ("ESL", "GLS3", "erisalib", "EGL"):
     return ESLErrorMsg("Windows x86 native-call ABI is unavailable in the Android runtime");
 }
 \n''' + text[end:]
-            text = text.replace("nValue = ERealFontImage::IsEnabledFontSmoothing() ? -1 : 0 ;", "return ESLErrorMsg(\"Legacy font smoothing query is not connected to the Android renderer\");")
-            text = text.replace("ERealFontImage::EnableFontSmoothing( nFlags != 0 ) ;", "return ESLErrorMsg(\"Legacy font smoothing control is not connected to the Android renderer\");")
+            text = text.replace('#include "platform/sdl/runtime_control.h"', '#include "platform/sdl/runtime_control.h"\n#include "platform/sdl/system.h"')
+            text = text.replace("nValue = ERealFontImage::IsEnabledFontSmoothing() ? -1 : 0 ;", '''
+#if defined(STUDYSTEADY_PLATFORM_SDL3)
+        nValue = study::platform::sdl::IsFontSmoothingEnabled() ? -1 : 0;
+#else
+        return ESLErrorMsg("Legacy font smoothing query is not connected to the Android renderer");
+#endif''')
+            text = text.replace("ERealFontImage::EnableFontSmoothing( nFlags != 0 ) ;", '''
+#if defined(STUDYSTEADY_PLATFORM_SDL3)
+        study::platform::sdl::SetFontSmoothingEnabled(nFlags != 0);
+#else
+        return ESLErrorMsg("Legacy font smoothing control is not connected to the Android renderer");
+#endif''')
             text = text.replace("ESLThread::GetLogicalProcessorCount()", "sysconf(_SC_NPROCESSORS_ONLN)")
             text = text.replace("::glsGetEnabledProcessorType( )", "LegacyProcessorFeatures()")
             text = text.replace("::glsEnableProcessorType( 0 ) ;", "return ESLErrorMsg(\"Windows processor feature control is unavailable on ARM64\");")

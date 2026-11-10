@@ -68,6 +68,7 @@ add_library(gls4_sdl STATIC ${SDL_SDK_SOURCES}
     native/platform/sdl/synchronization.cpp native/platform/sdl/memory_info.cpp
     native/platform/sdl/system.cpp native/platform/sdl/game_file_opener.cpp native/platform/sdl/sdl_pcm_stream.cpp
     native/platform/sdl/runtime_control.cpp
+    native/platform/sdl/legacy_bshf.cpp
     native/platform/sdl/device_volume.cpp
     native/platform/sdl/mobile_orientation.cpp
     native/platform/sdl/sdl_sound_player.cpp native/platform/sdl/image_codec.cpp
