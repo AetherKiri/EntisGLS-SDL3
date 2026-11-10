@@ -114,6 +114,12 @@ std::string LegacyGameLastError() { return lastError; }
 
 int RunLegacyGame(const wchar_t *arguments, const entis::launcher::GameLaunchConfig* launch) {
     lastError.clear();
+    struct PackagedFiles {
+        explicit PackagedFiles(const entis::launcher::GameLaunchConfig* config) {
+            if(config)entis::io::SetReadOnlyFiles(config->gameDirectory,config->packagedFiles);
+        }
+        ~PackagedFiles() {entis::io::SetReadOnlyFiles({},{});}
+    } packagedFiles(launch);
     RuntimeScope runtime;
     ECSEnvironment environment;
     study::platform::LogWrite(study::platform::LogPriority::Info, "EntisGLS",

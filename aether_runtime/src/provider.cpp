@@ -76,6 +76,7 @@ struct Player {
     std::string error, workerError, explicitConfig, debugSnapshot;
     std::thread worker;
     std::atomic<bool> finished{false};
+    std::atomic<bool> cursorVisible{true};
     int exitCode = 0;
     bool opened = false, started = false, sdk = false, video = false, paused = false;
     bool stopping = false, ownsSession = false;
@@ -136,7 +137,12 @@ struct Player {
         }
         entis::launcher::SetGamePsbKeyResolver(std::make_shared<entis::launcher::PsbKeyResolver>(root, cache, config.psbKey));
         platform::SetEmbeddedPresentation(true);
-        platform::SetEmbeddedPlatformRequest(host.platform_request, host.user_data);
+        platform::SetEmbeddedPlatformRequest([](void* opaque, const char* operation, const char* argument) {
+            auto& player=*static_cast<Player*>(opaque);
+            if(operation && std::strcmp(operation,"runtime_cursor_visible")==0)
+                player.cursorVisible.store(argument && std::strcmp(argument,"visible=1")==0);
+            if(player.host.platform_request)player.host.platform_request(player.host.user_data,operation,argument);
+        },this);
         platform::SetWindowDrawHandler(&StudySteadyDrawWindow);
         platform::SetFrameObserver(capture, this);
         SakuraGL::Initialize(); sdk = true;
@@ -324,6 +330,8 @@ engine_result_t debug(void* opaque, char* output, uint32_t size, uint32_t* writt
             {"input_events", p.inputs}, {"error", p.error}, {"visible_message_characters", 0}};
         data["save_directory"]=(p.root/"savedata").u8string();
         data["font_smoothing"] = platform::IsFontSmoothingEnabled();
+        data["cursor_visible"] = p.cursorVisible.load();
+        data["packaged_resources"] = p.config.packagedFiles.size();
         if (p.config.runtime == entis::launcher::GameLaunchConfig::Runtime::WitchWizard) {
             const auto state = entis::witch::Snapshot();
             data["witch"] = state.is_object() ? state : nlohmann::json::object();

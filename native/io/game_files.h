@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <memory>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -37,6 +38,10 @@ public:
 // One selected game per process. A null backend clears the mapping. Configure
 // before launch; streams and in-flight operations retain their own ownership.
 void SetBackend(const std::string& absoluteVirtualRoot, std::shared_ptr<Backend> backend);
+using ReadOnlyFiles = std::map<std::string, std::shared_ptr<const std::vector<std::uint8_t>>>;
+// A session-owned packaged-file layer. Writes always use the underlying game
+// storage, and opened streams remain valid after the layer is cleared.
+void SetReadOnlyFiles(const std::filesystem::path& root, ReadOnlyFiles files);
 bool IsVirtual(const std::filesystem::path& path);
 std::filesystem::path Canonical(const std::filesystem::path& path, bool mustExist = true);
 FileInfo Stat(const std::filesystem::path& path);

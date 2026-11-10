@@ -33,6 +33,7 @@ add_subdirectory("${entis_vendor}" "${CMAKE_CURRENT_BINARY_DIR}/sdk")
 find_package(nlohmann_json CONFIG REQUIRED)
 add_library(aether_entisgls_runtime SHARED src/provider.cpp src/input.cpp src/font_discovery.cpp src/storage.cpp src/game_hooks.cpp
     "${entis_vendor}/native/launcher/game_config.cpp"
+    "${entis_vendor}/native/launcher/molebox_resources.cpp"
     "${entis_vendor}/native/launcher/config_encoding.cpp"
     "${entis_vendor}/native/launcher/archive_launch_fallback.cpp"
     "${entis_vendor}/native/launcher/runtime_session.cpp"
@@ -93,6 +94,8 @@ if(AETHERKIRI_BUILD_ENTISGLS_TESTS)
         add_test(NAME entisgls-${mode} COMMAND aether_entisgls_adaptation_test ${mode} "${CMAKE_CURRENT_BINARY_DIR}/adaptation-${mode}")
     endforeach()
     add_test(NAME entisgls-configuration COMMAND launcher_config_test "${CMAKE_CURRENT_BINARY_DIR}/config-fixtures")
+    add_test(NAME entisgls-packaged-resources COMMAND molebox_resources_test
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tests/fixtures/molebox" "${CMAKE_CURRENT_BINARY_DIR}/package-fixture")
     add_test(NAME entisgls-speech-capabilities COMMAND legacy_speech_test)
     add_test(NAME entisgls-font-enumeration COMMAND legacy_setup_fonts_test)
     add_test(NAME entisgls-font-rasterization COMMAND launcher_fonts_test
@@ -122,7 +125,7 @@ if(AETHERKIRI_BUILD_ENTISGLS_TESTS)
         ENVIRONMENT "SDL_AUDIODRIVER=dummy" SKIP_RETURN_CODE 77 LABELS "gpu")
     # Integrated CI builds the default target before running the full CTest
     # inventory. Include every registered executable when tests are enabled.
-    add_custom_target(aether_entisgls_tests ALL DEPENDS launcher_config_test legacy_speech_test aether_entisgls_witch_test
+    add_custom_target(aether_entisgls_tests ALL DEPENDS launcher_config_test molebox_resources_test legacy_speech_test aether_entisgls_witch_test
         aether_entisgls_adaptation_test aether_entisgls_provider_test aether_entisgls_storage_test
         legacy_setup_fonts_test launcher_fonts_test aether_entisgls_motion_masks_test aether_entisgls_motion_timeline_test legacy_emote_api_test motion_atlas_projection_test
         psb_key_resolver_test psb_key_settings_test game_save_directory_test legacy_atomic_path_test
