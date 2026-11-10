@@ -6,15 +6,20 @@
 #include <sakuragl/erisa/sgl_erisa_archive_file.h>
 #include "launcher/config_encoding.h"
 #include "launcher/game_config.h"
+#include "launcher/runtime_graphics_locks.h"
 #include "platform/sdl/system.h"
+#include "platform/sdl/legacy_bshf.h"
 #include "platform/sdl/runtime_control.h"
+#include "platform/sdl/mutex_unlock.h"
 #include "platform/sdl/sdl_pcm_stream.h"
 #include "runtime/cotopha_port/legacy_sprite.h"
 #include "runtime/cotopha_port/legacy_sprite_draw.h"
 #include "runtime/cotopha_port/legacy_sprite_projection.h"
+#include "runtime/cotopha_port/legacy_image_export.h"
 #include "runtime/cotopha_port/legacy_message.h"
 #include "runtime/cotopha_port/legacy_window.h"
 #include <sakuraglx/sprite/sglx_sprite_button.h>
+#include <sakuraglx/sprite/sglx_sprite_edit.h>
 #include <SDL3/SDL.h>
 #include <atomic>
 #include <cmath>
@@ -106,6 +111,29 @@ void input() {
     require(TranslateInput(event,out,text)&&text==u8"🌸"&&out.text.text==text.c_str(),"text scalar owns UTF8 payload");
     for(unsigned cp:{0u,0xd800u,0xdfffu,0x110000u}){event.unicode_codepoint=cp;require(!TranslateInput(event,out,text),"invalid scalar rejected");}
     event.struct_size=0;require(!TranslateInput(event,out,text),"short ABI input rejected");
+}
+void editOptions() {
+    using SakuraGL::SGLSpriteEdit;
+    class Edit final : public SGLSpriteEdit {
+    public:
+        using SGLSpriteEdit::InvokeCommand;
+    } edit;
+    auto option = [&](const wchar_t* name, const wchar_t* value) {
+        SSystem::SXMLDocument command;
+        command.SetTag(L"option");
+        command.SetAttributeAs(name, value);
+        edit.InvokeCommand(command, nullptr);
+        return edit.GetEditStyle().nEditFlags;
+    };
+    const auto accepted = SGLSpriteEdit::editAcceptReturn | SGLSpriteEdit::editAcceptTab;
+    require((option(L"accept", L"return tab") & accepted) == accepted,
+            "edit options accept both newline and tab without reading past the keyword table");
+    require((option(L"deny", L"return tab") & accepted) == 0,
+            "edit options can disable accepted input again");
+    require((option(L"accept", L"unknown tab") & accepted) == SGLSpriteEdit::editAcceptTab,
+            "unknown edit keywords are ignored and later valid keywords still apply");
+    require((option(L"accept", L"") & accepted) == SGLSpriteEdit::editAcceptTab,
+            "empty edit options retain existing flags");
 }
 ECSStructure* vector(double x,double y,double z) {
     auto* value=new ECSStructure;value->m_pwszTag=L"Vector";
@@ -230,6 +258,50 @@ void graphics() {
     SGLFont::RegisterStockFont(L"Fixture Face & 中文",new TestFont);
     require(CheckLegacyMessage(),"message pixels, ruby and typewriter lifecycle");
     {
+        ECSContext context; ECSMessageSprite message;
+        require(!message.CreateMessage(64,32),"decorated message canvas");
+        auto style=message.NativeMessage().GetMessageStyle();
+        style.decoration.nFlags=0;
+        style.decoration.rgbaBody=SGLPalette(0xffffd3e5u);
+        style.decoration.rgbaBorder=SGLPalette(0);
+        style.decoration.rgbaShadow=SGLPalette(0);
+        style.decoration.ptShadow=SGLPoint(4,0);
+        message.NativeMessage().SetMessageStyle(style);
+        auto pixels=[&](ECSMessageSprite& sprite,uint32_t color) {
+            auto* glyph=sprite.NativeMessage().GetMessageCharacterAt(0);
+            require(glyph&&glyph->m_pImage,"decorated glyph exists");
+            auto size=glyph->m_pImage->GetImageSize();unsigned count=0;SGLPalette pixel;
+            for(int y=0;y<size.h;++y)for(int x=0;x<size.w;++x)
+                if(!glyph->m_pImage->GetPixelRGBA(pixel,x,y)&&pixel.ui32==color)++count;
+            return count;
+        };
+        auto output=[&] {
+            message.NativeMessage().ClearMessage();size_t consumed=0;
+            require(!message.OutputMessage(L"A",consumed)&&consumed==1,"decorated glyph output");
+        };
+        invoke(context,message,L"SetFontBordering",{new ECSInteger(-1)});
+        output();
+        require(pixels(message,0xff000000u)>0,"user outline is opaque even without an XML border or visible shadow");
+        require(pixels(message,0xffffd3e5u)>0,"outline preserves the authored pastel body color");
+        EMemoryFile saved;require(!saved.Create(4096)&&!message.Save(saved,context),"save user outline");
+        saved.Seek(0,ESLFileObject::FromBegin);ECSMessageSprite restored;
+        require(!restored.Load(saved,context)&&!restored.CommitAllReference(context),"restore user outline");
+        require(pixels(restored,0xff000000u)>0,"restored dialogue retains its visible outline");
+        // Changing XML style must not reset the independent GLS3 user option.
+        message.NativeMessage().SetMessageStyle(style);output();
+        require(pixels(message,0xff000000u)>0,"style replacement preserves the user outline");
+        invoke(context,message,L"SetFontBordering",{new ECSInteger(0)});output();
+        require(pixels(message,0xff000000u)==0,"outline can be disabled");
+        invoke(context,message,L"SetShadowTransparency",{new ECSInteger(128)});output();
+        require(pixels(message,0x7f000000u)>0,"enabling a half-opacity shadow renders actual shadow pixels");
+        invoke(context,message,L"SetShadowTransparency",{new ECSInteger(256)});output();
+        require(pixels(message,0x7f000000u)==0,"disabling the shadow removes its pixels");
+        style.decoration.nFlags=SGLLetterer::flagBorder;
+        style.decoration.rgbaBorder=SGLPalette(0xff00ff00u);style.decoration.widthBorder=1;
+        message.NativeMessage().SetMessageStyle(style);output();
+        require(pixels(message,0xff00ff00u)>0,"disabling the user outline preserves an authored XML border");
+    }
+    {
         ECSContext context;
         EMemoryFile saved;require(!saved.Create(4096),"message save buffer");
         {
@@ -250,6 +322,44 @@ void graphics() {
         EMemoryFile again;require(!again.Create(4096)&&!restored.Save(again,context),"restored message can save again");
     }
     require(CheckLegacySpriteDraw(),"existing pixel, animation and hit-test regressions");
+    {
+        // LoadImage must establish playback even for a single-frame overlay.
+        // Scripts discard screen items once IsDuringAnimation becomes false.
+        SGLImage image;SGLImageInfo info;
+        info.width=info.height=2;info.depth=32;info.format=formatImageARGB;
+        require(!image.CreateBuffer(info,SGLImageObject::bufferOnMemory),"overlay image");
+        image.FillImage(SGLPalette(0xff336699));
+        EMemoryFile bitmap;require(!bitmap.Create(256)&&!LegacyEncodeImage(image,bitmap,L"image/bmp"),"encode overlay fixture");
+        ECSContext context;ECSSprite sprite;
+        bitmap.Seek(0,ESLFileObject::FromBegin);
+        require(!sprite.ReadImageFile(bitmap),"load single-frame overlay through the real image loader");
+        require(invoke(context,sprite,L"IsDuringAnimation",{})==-1,"loaded image preserves GLS3 default playback");
+        require(invoke(context,sprite,L"BeginAnimation",{new ECSInteger(-1)})==0,"loaded image accepts infinite playback");
+        sprite.NativeSprite().AdvanceTime(10000);
+        require(invoke(context,sprite,L"IsDuringAnimation",{})==-1,"single-frame infinite overlay remains active");
+        SGLPalette pixel;
+        require(sprite.NativeSprite().GetAttachedImage()&&
+            !sprite.NativeSprite().GetAttachedImage()->GetPixelRGBA(pixel,0,0)&&pixel.ui32==0xff336699,
+            "single-frame overlay retains its rendered pixels");
+        EMemoryFile saved;require(!saved.Create(256)&&!SaveLegacySpriteAnimation(saved,sprite),"save infinite overlay playback");
+        ECSSprite restored;bitmap.Seek(0,ESLFileObject::FromBegin);
+        require(!restored.ReadImageFile(bitmap),"reload overlay pixels");
+        saved.Seek(0,ESLFileObject::FromBegin);
+        require(!LoadLegacySpriteAnimation(saved,restored)&&
+            !CommitLegacySpriteDrawing(context,restored,nullptr,-1,SGLRect(),nullptr),"restore overlay playback");
+        restored.NativeSprite().AdvanceTime(10000);
+        require(invoke(context,restored,L"IsDuringAnimation",{})==-1,"restored overlay stays active");
+        require(invoke(context,restored,L"EndAnimation",{})==0&&
+            invoke(context,restored,L"IsDuringAnimation",{})==0,"explicit overlay stop completes playback");
+        require(invoke(context,sprite,L"BeginAnimation",{new ECSInteger(1),new ECSInteger(0),new ECSInteger(100)})==0,
+            "single-frame finite animation begins");
+        sprite.NativeSprite().AdvanceTime(50);
+        require(invoke(context,sprite,L"IsDuringAnimation",{})==-1,"finite overlay retains its requested duration");
+        sprite.NativeSprite().AdvanceTime(50);
+        require(invoke(context,sprite,L"IsDuringAnimation",{})==0,"finite overlay completes");
+        require(invoke(context,sprite,L"BeginAnimation",{new ECSInteger(-1)})==0&&!sprite.Release()&&
+            invoke(context,sprite,L"IsDuringAnimation",{})==0,"releasing an image clears playback");
+    }
     {
         struct OwnedItem : SGLSprite {
             int& destroyed;
@@ -359,6 +469,93 @@ void sceneBinary() {
         [](SSystem::SArray<uint8_t>& bytes,const wchar_t* text){return S3DItemBezierCurveSerializer::ParseData(bytes,text);});
 }
 
+void legacyBshf(const std::filesystem::path& root) {
+    using namespace SSystem;
+    // Original, asset-free golden vectors produced by the supplied GLS3
+    // ERIBshfBuffer::EncodeBuffer. Plaintext is bytes 0..70, then zero padding.
+    const char* vectors[] = {
+        "50a14404188833730a44930148300c08083081bab107c33123c846180ec228001135e74dbabb7d518e05534062ff691bc53600758a1c900562a68e8508744046000a0002000000200000004801004000000320000c801004000000000000000004040443",
+        "340474005650990cc2240c0820f734922805b400268209aa6a09429008c849825c40f96849e3301424a9b5387290442f95888555d55b1df141b041ca70564d7a028000000500080000200000100004200000020120000000070000000000100004040443",
+        "480024e4700510e920d0500669318152a9e0d1190810100d1a1e81060323aa088ab0cba2ff0ec46c65092b42222a08a601ff353d1ad01a418401d51ae299376b000200001000002000000000000800010088000000420040800020004100101004040443"};
+    const wchar_t* passwords[] = {L"fixture", L"", L"abcdefghijklmnopqrstuvwxyz0123456789"};
+    std::vector<uint8_t> first;
+    for (size_t index = 0; index < 3; ++index) {
+        std::vector<uint8_t> encoded;
+        for (const char* p = vectors[index]; *p; p += 2) encoded.push_back(uint8_t(std::stoul(std::string(p, 2), nullptr, 16)));
+        if (!index) first = encoded;
+        struct PartialInput : SInputStream {
+            const std::vector<uint8_t>& data; size_t offset = 0;
+            explicit PartialInput(const std::vector<uint8_t>& bytes) : data(bytes) {}
+            size_t Read(void* destination, size_t count) override {
+                count = std::min({count, size_t(7), data.size() - offset});
+                std::memcpy(destination, data.data() + offset, count); offset += count; return count;
+            }
+        } source(encoded);
+        std::unique_ptr<SakuraCL::CRC32InputStream> decoded(
+            study::platform::sdl::CreateLegacyBshfDecoder(&source, 71, passwords[index]));
+        require(bool(decoded), "BSHF golden vector, password expansion and rotating blocks");
+        std::vector<uint8_t> plain(71);
+        require(decoded->Read(plain.data(), 13) == 13 && decoded->Read(plain.data() + 13, 58) == 58,
+                "BSHF supports partial source and decoded reads");
+        for (size_t i = 0; i < plain.size(); ++i) require(plain[i] == i, "BSHF exact plaintext");
+        require(decoded->Read(plain.data(), 1) == 0, "BSHF excludes padding and checksum");
+    }
+    auto accepts = [&](std::vector<uint8_t> bytes, uint64_t size, const wchar_t* password) {
+        SMemoryReferenceFile source; source.AttachMemory(bytes.data(), bytes.size());
+        std::unique_ptr<SakuraCL::CRC32InputStream> decoded(
+            study::platform::sdl::CreateLegacyBshfDecoder(&source, size, password));
+        return bool(decoded);
+    };
+    require(!accepts(first, 71, L"wrong"), "BSHF rejects wrong password through XOR32");
+    auto corrupt = first; corrupt.back() ^= 1;
+    require(!accepts(corrupt, 71, L"fixture"), "BSHF verifies trailer before publishing plaintext");
+    corrupt.resize(31);
+    require(!accepts(corrupt, 71, L"fixture"), "BSHF rejects truncated blocks");
+    require(accepts({0, 0, 0, 0}, 0, L"") && !accepts({}, 0, L""), "empty BSHF still requires checksum");
+    require(!accepts(first, UINT64_MAX, L"fixture"), "BSHF rejects impossible decoded lengths");
+
+    const auto path = root / "legacy.noa";
+    SString wide; wide.FromUTF8(reinterpret_cast<const uint8_t*>(path.u8string().c_str()));
+    {
+        ERISA::SGLArchiveFile::SDirectory directory;
+        ERISA::SGLArchiveFile::FILE_ENTRY_EX entry{};
+        directory.AddFileEntry(L"fixture.bin", entry);
+        SStandardFileOpener files;
+        std::unique_ptr<SFileInterface> file(files.NewOpenFile(wide, SFile::modeCreate));
+        ERISA::SGLArchiveFile archive;
+        require(file && archive.OpenArchive(file.get(), false, SFile::modeCreate, &directory) == errSuccess,
+                "legacy NOA fixture create");
+        require(archive.DescendFile(L"fixture.bin") == errSuccess && archive.Write(first.data(), first.size()) == first.size(),
+                "legacy NOA fixture payload");
+        require(archive.AscendFile() == errSuccess && archive.CloseArchive() == errSuccess, "legacy NOA fixture close");
+    }
+    // Change only the first serialized directory entry's decoded length and
+    // encoding. The SDK writer already supplied the chunk offsets and bounds.
+    {
+        std::fstream file(path, std::ios::in | std::ios::out | std::ios::binary);
+        const char length[8] = {71, 0, 0, 0, 0, 0, 0, 0}, encoding[4] = {0, 0, 0, 0x40};
+        file.seekp(84); file.write(length, 8); file.seekp(96); file.write(encoding, 4);
+        // The current writer includes an optional CRC32 field even for raw
+        // entries. Populate it for the decoded fixture, alongside old XOR32.
+        const uint8_t crc[4] = {0x71, 0xe3, 0xae, 0x58};
+        file.seekp(120); file.write(reinterpret_cast<const char*>(crc), 4);
+        require(bool(file), "legacy NOA directory patch");
+    }
+    SStandardFileOpener files;
+    std::unique_ptr<SFileInterface> file(files.NewOpenFile(wide, SFile::modeRead));
+    ERISA::SGLArchiveFile archive;
+    require(file && archive.OpenArchive(file.get()) == errSuccess, "legacy NOA fixture reopen");
+    archive.SetDefaultPassword(L"fixture");
+    std::unique_ptr<SFileInterface> member(archive.NewOpenFile(L"fixture.bin", SFile::modeRead));
+    uint8_t plain[71]{};
+    require(member && member->GetLength() == 71 && member->Read(plain, sizeof(plain)) == 71,
+            "native archive opener reaches the legacy BSHF decoder");
+    for (size_t i = 0; i < sizeof(plain); ++i) require(plain[i] == i, "archive BSHF plaintext");
+    require(archive.DescendFile(L"fixture.bin", L"fixture") == errSuccess && archive.Read(plain, 71) == 71,
+            "archive cursor also supports legacy BSHF");
+    require(archive.AscendFile() == errSuccess, "legacy BSHF cursor close");
+}
+
 void serialization() {
     sceneBinary();
     ECSEnvironment environment;require(!environment.InitEnvironment(),"serialization environment");
@@ -391,6 +588,24 @@ void serialization() {
 }
 
 void fonts(const std::filesystem::path& root) {
+    ECSContext context;
+    auto returned = [&] {
+        std::unique_ptr<ECSObject> result(context.PopObject());
+        INT64 value = 0;
+        require(result && !result->OperateInteger(value), "font smoothing returns a script integer");
+        return value;
+    };
+    for (int enabled : {0, -1, 0, 1}) {
+        ECSObjArray<ECSObject> args;
+        args.Add(new ECSInteger(1)); args.Add(new ECSInteger(enabled));
+        require(!context.Call_SetSystemPerformance(args), "legacy font smoothing setting is supported");
+        require(returned() == enabled, "font smoothing setter preserves the native return value");
+        require(study::platform::sdl::IsFontSmoothingEnabled() == (enabled != 0),
+                "script font smoothing controls the renderer setting");
+        ECSObjArray<ECSObject> query; query.Add(new ECSInteger(1));
+        require(!context.Call_GetSystemPerformance(query), "legacy font smoothing query is supported");
+        require(returned() == (enabled ? -1 : 0), "font smoothing query returns the current boolean");
+    }
     namespace fs=std::filesystem;
     fs::create_directories(root/"setup"/"fonts");fs::create_directories(root/".hidden");
     for(const auto* path:{"setup/fonts/中文.OTF","b.ttf","a.ttc",".hidden/ignored.otf","not-a-font.txt"})
@@ -591,6 +806,78 @@ void buttonStatus() {
     require(CheckLegacyWindowCommandQueue(), "status conversion preserves click and command queue behavior");
 }
 void control() {
+    {
+        SSystem::SSharableMutex mutex;mutex.Initialize();
+        SSystem::SMutex* windowMutex=&mutex;
+        require(!mutex.Wait(500)&&!mutex.Wait(500),"recursive window lock");
+        const auto depth=study::platform::sdl::UnlockAllMutex(windowMutex);
+        const auto remaining=mutex.TestLocked();
+        if(remaining)mutex.UnlockAll(); // Leave the failing baseline fixture clean.
+        require(depth==2&&remaining==0,"window handoff clears shared ownership as well as the base mutex");
+        auto next=std::async(std::launch::async,[&] {
+            if(mutex.Wait(500)!=SSystem::errSuccess)return false;
+            const auto acquired=mutex.TestLocked();mutex.Release();return acquired==1;
+        });
+        require(next.get(),"render thread can acquire the released window mutex");
+        require(!windowMutex->Relock(depth)&&mutex.TestLocked()==2,"script regains both levels after window handoff");
+        mutex.Release();mutex.Release();
+        SSystem::SMutex plain;plain.Initialize();plain.Wait();
+        require(study::platform::sdl::UnlockAllMutex(&plain)==1&&!plain.TestLocked(),"plain UI mutex can also be handed off");
+        require(study::platform::sdl::UnlockAllMutex(nullptr)==0,"absent UI mutex needs no handoff");
+    }
+    {
+        class ReleaseGapMutex final : public SSystem::SSharableMutex {
+        public:
+            void BeginRelease() {
+                SSystem::QuickLock(); UnlockSharedThread(0); SSystem::QuickUnlock();
+            }
+            void FinishRelease() { SSystem::SMutex::Release(); }
+        } mutex;
+        mutex.Initialize();
+        // Pause at the real gap between removing the shared-owner entry and
+        // releasing the underlying mutex. Another thread can enter UnlockAll
+        // here during E-mote shutdown, without owning either lock.
+        std::promise<void> gap, finish;
+        auto resume = finish.get_future();
+        std::thread owner([&] {
+            mutex.Wait(); mutex.BeginRelease(); gap.set_value();
+            resume.wait(); mutex.FinishRelease();
+        });
+        gap.get_future().wait();
+        SDL_LogOutputFunction oldLog; void* oldUser;
+        SDL_GetLogOutputFunction(&oldLog, &oldUser);
+        std::atomic<unsigned> assertions{0};
+        SDL_SetLogOutputFunction([](void* user, int, SDL_LogPriority, const char* message) {
+            if (std::strstr(message, "EntisGLS assertion")) ++*static_cast<std::atomic<unsigned>*>(user);
+        }, &assertions);
+        const auto foreignDepth = mutex.UnlockAll();
+        const auto foreignWait = mutex.SSystem::SMutex::Wait(0);
+        finish.set_value(); owner.join();
+        SDL_SetLogOutputFunction(oldLog, oldUser);
+        require(foreignDepth == 0 && foreignWait == SSystem::errTimeout,
+                "nonowner UnlockAll cannot release another thread's mutex during its release transition");
+        require(assertions == 0, "nonowner UnlockAll does not assert on a valid release transition");
+        require(mutex.Wait(500) == SSystem::errSuccess, "owner release completes after concurrent UnlockAll");
+        mutex.Release();
+    }
+    {
+        std::thread worker([] {
+            entis::launcher::RuntimeGraphicsLocks locks;
+            SSystem::Lock(); SSystem::Lock();
+            // Model a cancelled script that never executes Window.Unlock.
+        });
+        worker.join();
+        const bool released = SSystem::Lock(500) == SSystem::errSuccess;
+        if (released) SSystem::Unlock();
+        require(released, "VM exit releases script-owned recursive graphics locks");
+        SSystem::Lock();
+        {
+            entis::launcher::RuntimeGraphicsLocks locks;
+            SSystem::Lock(); SSystem::Lock();
+        }
+        const auto depth = SSystem::UnlockAll();
+        require(depth == 1, "VM cleanup preserves its caller's original graphics lock depth");
+    }
     auto* mutex=ECSSakura2Processor::mutexGlobalAtomic;
     auto* signal=ECSSakura2Processor::signalLeave;
     ECSSakura2Processor::Initialize();
@@ -635,7 +922,7 @@ int main(int argc,char** argv) {
         study::platform::sdl::SystemPaths paths;paths.assetsRoot=paths.storageRoot=paths.localRoot=paths.gameRoot=root.string();
         require(study::platform::sdl::ConfigureSystemPaths(paths),"fixture paths");SakuraGL::Initialize();ECotophaScript::Initialize(0);ECotophaScript::MultithreadReference(true);initialized=true;
         const std::string mode=argv[1];
-        if(mode=="witch-sdk")witchSdk();else if(mode=="game-hooks")gameHooks(root);else if(mode=="encoding")encoding();else if(mode=="input")input();else if(mode=="button-status")buttonStatus();else if(mode=="graphics")graphics();else if(mode=="image-cache")imageCache();else if(mode=="camera-cache")cameraCache();else if(mode=="control")control();else if(mode=="audio")audio();else if(mode=="fonts")fonts(root);else if(mode=="serialization")serialization();else throw std::runtime_error("unknown test mode");
+        if(mode=="legacy-bshf")legacyBshf(root);else if(mode=="witch-sdk")witchSdk();else if(mode=="game-hooks")gameHooks(root);else if(mode=="encoding")encoding();else if(mode=="input")input();else if(mode=="edit-options")editOptions();else if(mode=="button-status")buttonStatus();else if(mode=="graphics")graphics();else if(mode=="image-cache")imageCache();else if(mode=="camera-cache")cameraCache();else if(mode=="control")control();else if(mode=="audio")audio();else if(mode=="fonts")fonts(root);else if(mode=="serialization")serialization();else throw std::runtime_error("unknown test mode");
         std::printf("EntisGLS %s PASS (%u checks)\n",argv[1],checks);
     }catch(const std::exception& error){std::fprintf(stderr,"EntisGLS adaptation FAIL: %s\n",error.what());result=1;}
     study::platform::sdl::ResumeRuntimeForShutdown();

@@ -47,6 +47,18 @@ atomic_int_t __atomic_swap( atomic_int_t n, volatile atomic_int_t * p )
         raise ValueError(f"Unsupported futex operations in SDK: {operations}")
     text = text.replace("FUTEX_WAIT", "study::platform::sdl::FutexWait")
     text = text.replace("FUTEX_WAKE", "study::platform::sdl::FutexWake")
+    # Release removes the owner from the sharing table before releasing the
+    # base mutex. Another thread may call UnlockAll in that interval; it owns
+    # nothing, even though the base recursion count has not reached zero yet.
+    unlock_all = "atomic_int_t SSharableMutex::UnlockAll( void )\n{\n\tQuickLock() ;\n"
+    if text.count(unlock_all) != 1:
+        raise ValueError("SDK sharable UnlockAll changed; review required")
+    text = text.replace(unlock_all, unlock_all + """\tif ( FindSharedThread() < 0 )
+\t{
+\t\tQuickUnlock() ;
+\t\treturn 0 ;
+\t}
+""")
     text, count = re.subn(r"\bgettid\s*\(\s*\)", "study::platform::sdl::CurrentThreadId()", text)
     if count != 12:
         raise ValueError(f"Expected 12 reviewed thread-ID references, found {count}")

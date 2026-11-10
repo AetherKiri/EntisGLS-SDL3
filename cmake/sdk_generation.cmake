@@ -10,6 +10,7 @@ function(entis_track_sdk_generation)
         "${_entis_root}/native/runtime/cotopha_port/*.h"
         "${_entis_root}/native/runtime/cotopha_port/*.inc"
         "${_entis_root}/native/platform/sdl/*.inc"
+        "${_entis_root}/native/extensions/emote/tjs_runtime/*.inc"
         "${_entis_root}/vendor/official-loquaty/Loquaty/source/loquaty_file.cpp"
         "${_entis_root}/vendor/official-loquaty/Loquaty/source/loquaty_cls_clock.cpp"
         "${_entis_root}/vendor/official-loquaty/Loquaty/source/loquaty_date_time.cpp"

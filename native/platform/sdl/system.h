@@ -42,6 +42,13 @@ void SetDialogParent(SDL_Window* window);
 // An empty name restores native selection. The caller registers the stock face.
 void SetFontOverride(const std::wstring& family);
 std::wstring FontOverride();
+// Host-provided face used only when the requested stock family is unavailable.
+void SetFontFallback(const std::wstring& family);
+std::wstring FontFallback();
+// Legacy Get/SetSystemPerformance(1) controls rasterization of new glyphs,
+// including glyphs requested from already-created font instances.
+void SetFontSmoothingEnabled(bool enabled);
+bool IsFontSmoothingEnabled();
 
 // SDL lacks an API for resolving statically linked symbols in the current
 // executable. The application can supply its native-registration resolver.

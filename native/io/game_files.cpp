@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstring>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <system_error>
 #include <utility>
@@ -14,12 +15,45 @@ namespace fs = std::filesystem;
 std::mutex backendMutex;
 fs::path backendRoot;
 std::shared_ptr<Backend> selectedBackend;
+std::map<fs::path, std::shared_ptr<const std::vector<std::uint8_t>>> readOnlyFiles;
+fs::path readOnlyRoot;
+
+std::shared_ptr<const std::vector<std::uint8_t>> ReadOnly(const fs::path& path) {
+    const auto key = fs::absolute(path).lexically_normal();
+    std::lock_guard<std::mutex> lock(backendMutex);
+    const auto found = readOnlyFiles.find(key);
+    return found == readOnlyFiles.end() ? nullptr : found->second;
+}
 
 bool Within(const fs::path& root, const fs::path& path) {
     auto r = root.begin(), p = path.begin();
     for (; r != root.end(); ++r, ++p)
         if (p == path.end() || *r != *p) return false;
     return true;
+}
+std::map<std::string, FileInfo> PackagedChildren(const fs::path& path) {
+    const auto root = fs::absolute(path).lexically_normal();
+    std::map<std::string, FileInfo> entries;
+    std::lock_guard<std::mutex> lock(backendMutex);
+    if (readOnlyRoot.empty() || !Within(readOnlyRoot, root)) return entries;
+    for (const auto& [file, bytes] : readOnlyFiles) {
+        if (file == root || !Within(root, file)) continue;
+        const auto relative = file.lexically_relative(root);
+        FileInfo info;
+        info.kind = relative.has_parent_path() ? FileInfo::Kind::Directory : FileInfo::Kind::File;
+        info.size = info.kind == FileInfo::Kind::File ? bytes->size() : 0;
+        entries[relative.begin()->u8string()] = info;
+    }
+    return entries;
+}
+std::optional<FileInfo> PackagedInfo(const fs::path& path) {
+    FileInfo info;
+    if (const auto bytes = ReadOnly(path)) {
+        info.kind = FileInfo::Kind::File; info.size = bytes->size();
+        return info;
+    }
+    if (!PackagedChildren(path).empty()) { info.kind = FileInfo::Kind::Directory; return info; }
+    return {};
 }
 struct Route {
     std::shared_ptr<Backend> backend;
@@ -60,8 +94,25 @@ void SetBackend(const std::string& root, std::shared_ptr<Backend> backend) {
     backendRoot = std::move(normalized);
     selectedBackend = std::move(backend);
 }
-bool IsVirtual(const fs::path& path) { return bool(Resolve(path).backend); }
+void SetReadOnlyFiles(const fs::path& root, ReadOnlyFiles files) {
+    if (!files.empty() && (root.empty() || !root.is_absolute() || root == root.root_path()))
+        throw std::runtime_error("Packaged resources require an absolute game directory");
+    decltype(readOnlyFiles) next;
+    for (auto& [name, bytes] : files) {
+        const auto relative = fs::u8path(name);
+        if (relative.empty() || relative.is_absolute() || !bytes)
+            throw std::runtime_error("Invalid packaged resource path");
+        for (const auto& part : relative)
+            if (part == ".." || part == ".") throw std::runtime_error("Invalid packaged resource path");
+        next.emplace(fs::absolute(root / relative).lexically_normal(), std::move(bytes));
+    }
+    std::lock_guard<std::mutex> lock(backendMutex);
+    readOnlyFiles = std::move(next);
+    readOnlyRoot = readOnlyFiles.empty() ? fs::path{} : root.lexically_normal();
+}
+bool IsVirtual(const fs::path& path) { return bool(PackagedInfo(path)) || bool(Resolve(path).backend); }
 fs::path Canonical(const fs::path& path, bool mustExist) {
+    if (PackagedInfo(path)) return fs::absolute(path).lexically_normal();
     const auto route = Resolve(path);
     if (route.backend) {
         if (mustExist && route.backend->Stat(route.relative).kind == FileInfo::Kind::Missing)
@@ -73,6 +124,7 @@ fs::path Canonical(const fs::path& path, bool mustExist) {
     return mustExist ? fs::canonical(path) : fs::weakly_canonical(path);
 }
 FileInfo Stat(const fs::path& path) {
+    if (const auto info = PackagedInfo(path)) return *info;
     const auto route = Resolve(path);
     if (route.backend) return route.backend->Stat(route.relative);
     std::error_code error;
@@ -96,18 +148,33 @@ FileInfo Stat(const fs::path& path) {
 }
 std::vector<Entry> List(const fs::path& path) {
     const auto route = Resolve(path);
+    auto merged = PackagedChildren(path);
+    std::vector<Entry> entries;
     if (route.backend) {
-        auto entries = route.backend->List(route.relative);
+        if (merged.empty() || route.backend->Stat(route.relative).kind != FileInfo::Kind::Missing)
+            entries = route.backend->List(route.relative);
         for (const auto& entry : entries)
             if (entry.name.empty() || entry.name == "." || entry.name == ".." || entry.name.find_first_of("/\\\0", 0, 3) != std::string::npos)
                 throw std::runtime_error("Invalid filename returned by game provider");
-        return entries;
+    } else if (merged.empty() || fs::exists(path)) {
+        for (const auto& entry : fs::directory_iterator(path)) entries.push_back({entry.path().filename().u8string(), Stat(entry.path())});
     }
-    std::vector<Entry> entries;
-    for (const auto& entry : fs::directory_iterator(path)) entries.push_back({entry.path().filename().u8string(), Stat(entry.path())});
+    if (merged.empty()) return entries;
+    for (const auto& entry : entries) merged.emplace(entry.name, entry.info);
+    entries.clear();
+    for (auto& [name, info] : merged) entries.push_back({name, info});
     return entries;
 }
 std::FILE* Open(const fs::path& path, const char* mode) {
+    if (mode && mode[0] == 'r' && !std::strchr(mode, '+')) if (const auto bytes = ReadOnly(path)) {
+        // tmpfile gives the SDK a portable seekable stream, with automatic
+        // unlink/close cleanup and independent positions for duplicate opens.
+        File file(std::tmpfile(), &std::fclose);
+        if (!file || (!bytes->empty() && std::fwrite(bytes->data(), 1, bytes->size(), file.get()) != bytes->size()) ||
+            std::fflush(file.get()) != 0 || std::fseek(file.get(), 0, SEEK_SET) != 0)
+            throw std::runtime_error("Cannot open packaged resource stream");
+        return file.release();
+    }
     const auto route = Resolve(path);
     std::FILE* file;
     if (route.backend) file = route.backend->Open(route.relative, mode);

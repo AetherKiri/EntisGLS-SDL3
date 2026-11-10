@@ -33,8 +33,21 @@ def main():
         if src.name in ('PlayerCore.cpp', 'PlayerFrameProgress.cpp'):
             text = text.replace('#include "EmotePlayer.h"','#include "EmoteEngine.h"')
         if src.name == 'EmoteEngine.cpp':
+            text = '#include "timeline_easing.h"\n' + text
             text = text.replace('#include "EmotePlayer.h"', '#include "ResourceManager.h"')
             text = text.replace('#include "MsgIntf.h"', '#include "tjs_host.h"')
+            # The SDK's timeline route consumes an already decoded exponent.
+            # Preserve that exponent when routing through the public setter.
+            for signature in ('void EmoteEngine::seekTimeline_guess(',
+                              'void EmoteEngine::applyTimelineWindow_guess(',
+                              'void EmoteEngine::passTimelines_guess('):
+                body = extract(text, signature)
+                import re
+                adapted, count = re.subn(
+                    r'(setVariable\(track\.label, (?:frame|next)\.value, [^,]+,\s*)((?:frame|next)\.easingWeight)(\);)',
+                    r'\1studysteady::motion::TimelineEasingArgument(\2)\3', body)
+                assert count == 1, (signature, count)
+                text = text.replace(body, adapted)
             # The native constructors deliberately leave idle interpolation
             # scalars unwritten. Active step paths initialize them before use,
             # but the source serializers read them unconditionally. Canonical
@@ -278,9 +291,8 @@ bool Player::loadKrkrAtlasSource_guess(detail::MotionNode::SourceState &, Resour
         'void appendD3DMesh_guess(', 'bool shouldSkipD3DRenderItem_guess('])
     render = render.replace('(void)TVPShowSimpleMessageBox(message, caption);', 'throw std::runtime_error("Motion stencil reference overflow");')
     render += '\n}\n'
-    routine = extract(targets, 'void Player::renderPreparedItemsToD3DTexture_guess(\n        iTVPTexture2D *targetTexture,')
-    routine = routine.replace('void Player::renderPreparedItemsToD3DTexture_guess(', 'void renderSceneItems(bool priorDraw,')
-    routine = routine.replace('_priorDraw','priorDraw').replace('motion::render_backend_guess', '::motion::render_backend_guess')
+    render = '#include "platform/gl.h"\n' + render
+    routine = (ROOT / 'native/extensions/emote/tjs_runtime/gles_scene_items.inc').read_text()
     render += routine + '\n}\n'
     # In this adapter's enclosing namespace, explicitly qualify original
     # motion::detail/render_backend names rather than changing their types.

@@ -13,6 +13,7 @@ struct LegacySpriteDrawState;
 ESLError HandleLegacySpriteDraw(ECSContext &, ECSSprite &, const wchar_t *method,
                                ECSObjArray<ECSObject> &, bool &handled);
 void ResetLegacySpriteDrawState(ECSSprite &,bool preserveTone=false);
+ESLError AttachLegacySpriteAnimation(ECSSprite&, SakuraGL::SGLImageObject&);
 bool CheckLegacySpriteDraw();
 bool LegacyEffectAnimationEnabled();
 bool ReadLegacySpriteZScale(ECSSprite&, double& focal, bool& fixed);

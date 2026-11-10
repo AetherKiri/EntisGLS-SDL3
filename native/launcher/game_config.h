@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "io/game_files.h"
 
 namespace SSystem { class SFileOpener; }
 
@@ -25,6 +26,8 @@ struct FontAlias {
 struct GameLaunchConfig {
     enum class Runtime { Cotopha, WitchWizard };
     Runtime runtime = Runtime::Cotopha;
+    std::filesystem::path gameDirectory;
+    io::ReadOnlyFiles packagedFiles;
     // Optional host-owned, read-only resource layer. Never used for saves.
     std::shared_ptr<SSystem::SFileOpener> resourceOverrides;
     std::string fontOverride;

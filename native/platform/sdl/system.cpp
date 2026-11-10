@@ -25,6 +25,8 @@ bool inUse = false;
 std::mutex configurationMutex;
 std::mutex fontSelectionMutex;
 std::wstring selectedFont;
+std::wstring fallbackFont;
+std::atomic<bool> fontSmoothingEnabled{true};
 std::atomic<SDL_Window*> dialogParent{nullptr};
 SymbolResolver symbolResolver = nullptr;
 void* symbolResolverData = nullptr;
@@ -330,6 +332,16 @@ std::wstring FontOverride() {
     const std::lock_guard<std::mutex> lock(fontSelectionMutex);
     return selectedFont;
 }
+void SetFontFallback(const std::wstring& family) {
+    const std::lock_guard<std::mutex> lock(fontSelectionMutex);
+    fallbackFont = family;
+}
+std::wstring FontFallback() {
+    const std::lock_guard<std::mutex> lock(fontSelectionMutex);
+    return fallbackFont;
+}
+void SetFontSmoothingEnabled(bool enabled) { fontSmoothingEnabled.store(enabled); }
+bool IsFontSmoothingEnabled() { return fontSmoothingEnabled.load(); }
 void SetSymbolResolver(SymbolResolver resolver, void* userdata) {
     const std::lock_guard<std::mutex> lock(configurationMutex);
     symbolResolver = resolver;

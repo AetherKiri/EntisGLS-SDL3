@@ -1,4 +1,5 @@
 #include "extensions/emote/tjs_runtime/motion_apk_runtime.h"
+#include "extensions/emote/tjs_runtime/timeline_playback.h"
 #include "extensions/emote/tjs_runtime/gl_capabilities.h"
 #include "ncbind.hpp"
 #include "Player.h"
@@ -287,7 +288,7 @@ extern "C" int study_motion_get_variable(StudyMotionRuntime *r,uint64_t id,const
     if(!name||!value)throw std::runtime_error("invalid motion variable output");*value=r->actor(id).engine->getVariable(ttstr(name));
 });}
 extern "C" int study_motion_play_timeline(StudyMotionRuntime *r,uint64_t id,const char *name,uint32_t flags){return invoke(r,[&]{
-    if(!name)throw std::runtime_error("null motion timeline label");r->actor(id).engine->playTimeline_guess(ttstr(name),flags);
+    if(!name)throw std::runtime_error("null motion timeline label");studysteady::motion::PlaySdkTimeline(*r->actor(id).engine,ttstr(name),flags);
 });}
 extern "C" int study_motion_stop_timeline(StudyMotionRuntime *r,uint64_t id,const char *name){return invoke(r,[&]{
     if(!name)throw std::runtime_error("null motion timeline label");r->actor(id).engine->stopTimeline_guess(ttstr(name));

@@ -98,6 +98,19 @@ public:
     const SGLFontStyle &CurrentFont() const { return m_fsFont; }
     const SGLLetterer::Decoration &Decoration() const { return m_ltDecoration; }
     void SetDecoration(const SGLLetterer::Decoration &deco) { m_ltDecoration=deco; }
+    SGLLetterer::Decoration EffectiveDecoration() const {
+        auto deco=m_ltDecoration;
+        // GLS3's user setting is independent of the XML style. Without an
+        // authored border it uses an opaque outline in the shadow color,
+        // including when the shadow itself is disabled.
+        if(fontBorder_ && (!(deco.nFlags&SGLLetterer::flagBorder) || !deco.rgbaBorder.argb.Alpha)) {
+            deco.nFlags|=SGLLetterer::flagBorder;
+            deco.rgbaBorder=SGLPalette(deco.rgbaShadow.ui32|0xff000000u);
+            // GLS3 grows alpha from the four immediate neighboring pixels.
+            deco.widthBorder=1;
+        }
+        return deco;
+    }
     ESLError FontFace(const wchar_t *face) {
         m_strFontCur=face;
         m_fsFont.pszFace=m_strFontCur;
@@ -122,7 +135,7 @@ public:
         // its consumed count retained for the legacy OutputMessage ABI.
         SGLLetterer letterer;
         consumed=letterer.WriteLetter(m_font,m_lcLettering,text.c_str());
-        const auto error=letterer.DecorateLetter(m_ltDecoration);
+        const auto error=letterer.DecorateLetter(EffectiveDecoration());
         if(error) return static_cast<ESLError>(error);
         SGLImageRect bounds;
         if(letterer.GetLetterLength()) {
@@ -154,17 +167,21 @@ public:
         xml.SetTag(tag);
         if(attr) xml.SetAttributeAs(attr,value.c_str());
         if(!text.empty()) { auto *child=new SSystem::SXMLDocument;child->SetText(text.c_str());xml.AddElement(child); }
+        const auto original=m_ltDecoration;
+        m_ltDecoration=EffectiveDecoration();
         const auto result=AddLettering(xml);
+        m_ltDecoration=original;
         PostUpdate();
         return static_cast<ESLError>(result);
     }
-    void Border(bool enabled,bool preserveWidth=false) {
-        if(enabled) { m_ltDecoration.nFlags|=SGLLetterer::flagBorder;if(!preserveWidth)m_ltDecoration.widthBorder=2; }
-        else m_ltDecoration.nFlags&=~SGLLetterer::flagBorder;
-    }
+    void Border(bool enabled) { fontBorder_=enabled; }
+    bool FontBordering() const { return fontBorder_; }
+    bool fontBorder_=false;
     void ShadowTransparency(int transparency) {
         const unsigned alpha=(256-std::clamp(transparency,0,256))*255/256;
         m_ltDecoration.rgbaShadow=SGLPalette((m_ltDecoration.rgbaShadow.ui32 & 0xffffffu)|(alpha<<24));
+        if(alpha)m_ltDecoration.nFlags|=SGLLetterer::flagShadow;
+        else m_ltDecoration.nFlags&=~SGLLetterer::flagShadow;
     }
     ESLError CaptureStyle(SSystem::SXMLDocument& xml) const {
         if(m_ltDecoration.nGradationCount)return ESLErrorMsg("MessageSprite gradient text needs a saved gradient palette");
@@ -266,7 +283,7 @@ ESLError ECSMessageSprite::Save(ESLFileObject& file,ECSContext& context) {
     out.U32(blob.GetLength());out.Bytes(blob.GetBuffer(),blob.GetLength());
     const auto& action=Bridge().GetViewActionStyle();
     out.I32(defaultCharSpeed_);out.U32(action.msecPerChar);out.I32(defaultFade_);out.U32(action.msecFade);
-    out.I32((Bridge().Decoration().nFlags&SGLLetterer::flagBorder)!=0);out.I32(inSize_);out.Rect(messageRect_);
+    out.I32(Bridge().FontBordering());out.I32(inSize_);out.Rect(messageRect_);
     out.F64(action.vMove.x);out.F64(action.vMove.y);out.F64(action.vZoom.x);out.F64(action.vZoom.y);out.F64(action.zRotation);
     out.String(formattedLog_.c_str());return out.error;
 }
@@ -310,7 +327,7 @@ ESLError ECSMessageSprite::CommitAllReference(ECSContext& context) {
         if(const auto error=AttachMessageStyle(manager->GetSkin(),defaultStyle_.c_str()))return error;
     } else if(!defaultStyle_.empty())return ESLErrorMsg("Saved MessageSprite style manager is unavailable");
     if(const auto error=Bridge().RestoreStyle(restoredStyle_))return error;
-    Bridge().SetWritable(messageRect_);Bridge().SetViewActionStyle(restoredAction_);Bridge().Border(restoredBorder_,true);
+    Bridge().SetWritable(messageRect_);Bridge().SetViewActionStyle(restoredAction_);Bridge().Border(restoredBorder_);
     // The original loader explicitly restores a completed message, not a partly
     // faded frame. Rebuild native glyphs from the exact formatted text log.
     const auto text=formattedLog_;formattedLog_.clear();Bridge().ClearMessage();

@@ -6,9 +6,11 @@
 #include "platform/sdl/system.h"
 #include <sakuragl/sakuragl.h>
 #include <sakuragl/sgl2d/sgl_font.h>
+#include <sakuragl/sgl2d/sgl_lettering.h>
 #include <SDL3/SDL.h>
 #include <filesystem>
 #include <cstdio>
+#include <algorithm>
 #include <stdexcept>
 
 namespace {
@@ -32,6 +34,56 @@ std::vector<uint8_t> Glyph(const std::wstring& name) {
     Require(font.GetMetrics(pixels.data(), pixels.size(), metrics, L'M') == SakuraGL::sglErrSuccess,
             "named face glyph raster failed");
     return pixels;
+}
+void Smoothing(const std::wstring& name) {
+    using namespace SakuraGL;
+    using namespace study::platform::sdl;
+    for (uint32_t flags : {0u, uint32_t(SGLFontStyle::styleHighDefinition), uint32_t(SGLFontStyle::styleNoSmooth)}) {
+        SGLFont font;
+        SGLFontStyle style; style.pszFace = name.c_str(); style.nSize = 40; style.nStyles = flags;
+        SetFontSmoothingEnabled(true);
+        Require(font.SetStyle(style) == sglErrSuccess, "smoothing test font selection failed");
+        auto pixels = [&] {
+            SGLFontMetrics metrics{};
+            Require(font.GetMetrics(nullptr, 0, metrics, L'M') == sglErrSuccess, "smoothing glyph metrics failed");
+            std::vector<uint8_t> raster(size_t(metrics.rctExterior.w) * metrics.rctExterior.h);
+            Require(font.GetMetrics(raster.data(), raster.size(), metrics, L'M') == sglErrSuccess,
+                    "smoothing glyph raster failed");
+            return raster;
+        };
+        auto hasGray = [](const std::vector<uint8_t>& raster) {
+            return std::any_of(raster.begin(), raster.end(), [](uint8_t v) { return v > 0 && v < 255; });
+        };
+        const auto smooth = pixels();
+        Require(hasGray(smooth) == !(flags & SGLFontStyle::styleNoSmooth),
+                "global smoothing must retain explicit NoSmooth font style");
+        SetFontSmoothingEnabled(false);
+        const auto mono = pixels();
+        Require(!hasGray(mono) && std::find(mono.begin(), mono.end(), 255) != mono.end(),
+                "disabling smoothing must invalidate an existing glyph cache and produce visible monochrome text");
+        SetFontSmoothingEnabled(true);
+        Require(pixels() == smooth, "reenabling smoothing must restore the same cached character and sample scale");
+    }
+}
+void FixedPitchBaseline(const std::wstring& name) {
+    using namespace SakuraGL;
+    SGLFont font;
+    SGLFontStyle style; style.pszFace = name.c_str(); style.nSize = 26;
+    Require(font.SetStyle(style) == sglErrSuccess, "fixed-pitch font selection failed");
+    SGLLetteringContext natural;
+    natural.rectWritable = SGLRect(0, 0, 511, 63);
+    natural.ptStartWriting = SGLPoint(0, 0);
+    natural.pitchLine = 32;
+    natural.pitchChar = 0;
+    SGLLetteringContext fixed = natural;
+    fixed.pitchChar = 22;
+    SGLLetterer a, b;
+    Require(a.WriteLetter(font, natural, L"MM") == 2 && b.WriteLetter(font, fixed, L"MM") == 2,
+            "fixed-pitch lettering must retain both characters");
+    Require(a.GetCharacterAt(0)->ptOffset.y == b.GetCharacterAt(0)->ptOffset.y,
+            "fixed character spacing must not move the text baseline below its line");
+    Require(b.GetCharacterAt(1)->ptWriting.x - b.GetCharacterAt(0)->ptWriting.x == 22,
+            "fixed character spacing must retain the requested horizontal advance");
 }
 }
 
@@ -88,6 +140,21 @@ int main(int argc, char** argv) {
                 "missing alias source created a fake font");
         Require(CheckOpenTypeFont(regular.family, {L'M', L'A', L'B', L'9'}),
                 "regular TrueType style/size/rasterization regression");
+        Smoothing(regular.family);
+        FixedPitchBaseline(regular.family);
+        SetFontFallback(regular.registeredName);
+        Require(Glyph(L"Missing Windows font") == Glyph(regular.registeredName),
+                "host fallback must render text requested with an unavailable Windows family");
+        SetFontFallback(L"Unavailable fallback");
+        Require(Glyph(L"Default") == Glyph(regular.registeredName),
+                "an explicit game font takes priority even when the host fallback is unavailable");
+        SetFontFallback({});
+        {
+            SakuraGL::SGLFont missing;
+            SakuraGL::SGLFontStyle style; style.pszFace = L"Missing Windows font"; style.nSize = 40;
+            Require(missing.SetStyle(style) != SakuraGL::sglErrSuccess,
+                    "clearing the host fallback must restore failure for unavailable families");
+        }
         if (argc >= 4) {
             bool requested = false;
             const auto cjk = RegisterOpenTypeFont(L"archive-font.otf", L"Noto Serif CJK TC",

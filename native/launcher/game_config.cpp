@@ -1,6 +1,7 @@
 #include "launcher/game_config.h"
 #include "launcher/config_encoding.h"
 #include "launcher/archive_launch_fallback.h"
+#include "launcher/molebox_resources.h"
 #include "io/game_files.h"
 
 #include <sakuraglx/sakuraglx.h>
@@ -532,6 +533,7 @@ GameLaunchConfig NormalizeGameConfig(const fs::path& gameDir, const std::string&
     }
     if (!script) throw ConfigError("Launch configuration has no script element");
     GameLaunchConfig result;
+    result.gameDirectory = root;
     result.configSource = source;
     if(repairedUtf8) result.warnings.push_back("Invalid UTF-8 in launch configuration was replaced with U+FFFD");
     const auto declaredEntry = Attr(*script, "src");
@@ -709,7 +711,13 @@ GameLaunchConfig DiscoverGame(const fs::path& gameDir, const fs::path& explicitC
         const auto& resource = resources.front();
         auto source = path.filename().u8string();
         if (resource.offset) source += ":embedded@" + std::to_string(resource.offset);
-        return NormalizeGameConfig(root, DecodeConfig(resource.bytes), source + ":IDR_COTOMI");
+        auto config = NormalizeGameConfig(root, DecodeConfig(resource.bytes), source + ":IDR_COTOMI");
+        try {
+            config.packagedFiles = ReadMoleboxResources(ReadFile(path, maxExecutable));
+        } catch (const std::exception& error) {
+            throw ConfigError("Cannot read packaged resources from " + path.filename().u8string() + ": " + error.what());
+        }
+        return config;
     };
     auto read = [&](const fs::path& path) {
         CheckContained(root, path);
