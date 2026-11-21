@@ -8406,8 +8406,8 @@ SGLError S3DModelBuffer::GlobalIlluminationForVertexColor
 	{
 		return	sglErrFailed ;
 	}
-	S3DVertexBufferInterface::MeshInfo	mi ;
-	eslFillMemory( &mi, 0, sizeof(S3DVertexBufferInterface::MeshInfo) ) ;
+	S3DVertexBufferInterface::MeshInfo	mi {} ;
+	mi.vCenter = S3DVector( 0, 0, 0 ) ;
 	if ( gip.pVBO->GetMeshInfoAt( mi, gip.iMesh, 0 ) )
 	{
 		return	sglErrFailed ;

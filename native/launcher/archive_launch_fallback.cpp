@@ -53,7 +53,7 @@ std::string Escape(const std::string& value) {
 class ArchiveInput {
 public:
     explicit ArchiveInput(const fs::path& path)
-        : path_(path), size_(io::Stat(path).size), file_(io::Open(path, "rb"), &std::fclose) {}
+        : path_(path), size_(io::Stat(path).size), file_(io::Open(path, "rb")) {}
     std::uint64_t Size() const { return size_; }
     std::FILE* Stream() const { return file_.get(); }
     void Read(std::uint64_t offset, void* output, std::size_t count) {
@@ -71,7 +71,7 @@ public:
 private:
     fs::path path_;
     std::uint64_t size_;
-    std::unique_ptr<std::FILE, decltype(&std::fclose)> file_;
+    io::File file_;
 };
 
 struct Entry {

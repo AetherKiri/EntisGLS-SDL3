@@ -4161,8 +4161,8 @@ void S3DOPhysicsInstancingController::MakeHitPointsFromVBO
 {
 	SArray<S3DVector4>	bufVertex ;
 	//
-	S3DVertexBufferInterface::MeshInfo	minf ;
-	eslFillMemory( &minf, 0, sizeof(S3DVertexBufferInterface::MeshInfo) ) ;
+	S3DVertexBufferInterface::MeshInfo	minf {} ;
+	minf.vCenter = S3DVector( 0, 0, 0 ) ;
 	//
 	const size_t	nMeshCount = pVBO->GetMeshCount() ;
 	for ( size_t iMesh = 0; iMesh < nMeshCount; iMesh ++ )

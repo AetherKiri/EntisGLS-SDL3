@@ -78,7 +78,6 @@ Route Resolve(const fs::path& path) {
 [[noreturn]] void IOError(const fs::path& path, const char* action) {
     throw std::runtime_error(std::string(action) + ": " + path.u8string() + ": " + std::strerror(errno));
 }
-using File = std::unique_ptr<std::FILE, decltype(&std::fclose)>;
 }
 
 void SetBackend(const std::string& root, std::shared_ptr<Backend> backend) {
@@ -169,7 +168,7 @@ std::FILE* Open(const fs::path& path, const char* mode) {
     if (mode && mode[0] == 'r' && !std::strchr(mode, '+')) if (const auto bytes = ReadOnly(path)) {
         // tmpfile gives the SDK a portable seekable stream, with automatic
         // unlink/close cleanup and independent positions for duplicate opens.
-        File file(std::tmpfile(), &std::fclose);
+        File file(std::tmpfile());
         if (!file || (!bytes->empty() && std::fwrite(bytes->data(), 1, bytes->size(), file.get()) != bytes->size()) ||
             std::fflush(file.get()) != 0 || std::fseek(file.get(), 0, SEEK_SET) != 0)
             throw std::runtime_error("Cannot open packaged resource stream");
@@ -210,7 +209,7 @@ void Rename(const fs::path& oldPath, const fs::path& newPath) {
     else fs::rename(oldPath, newPath);
 }
 std::vector<std::uint8_t> ReadPrefix(const fs::path& path, std::size_t count) {
-    File file(Open(path, "rb"), &std::fclose);
+    File file(Open(path, "rb"));
     std::vector<std::uint8_t> bytes(count);
     if ((count && std::fread(bytes.data(), 1, count, file.get()) != count) || std::ferror(file.get()))
         throw std::runtime_error("Incomplete game file read: " + path.u8string());
@@ -220,7 +219,7 @@ std::vector<std::uint8_t> ReadFile(const fs::path& path, std::size_t limit) {
     const auto info = Stat(path);
     if (info.kind != FileInfo::Kind::File || info.size > limit)
         throw std::runtime_error("Game file is unavailable or exceeds the read limit: " + path.u8string());
-    File file(Open(path, "rb"), &std::fclose);
+    File file(Open(path, "rb"));
     std::vector<std::uint8_t> bytes(static_cast<std::size_t>(info.size));
     if ((!bytes.empty() && std::fread(bytes.data(), 1, bytes.size(), file.get()) != bytes.size()) ||
         std::fgetc(file.get()) != EOF || std::ferror(file.get()))

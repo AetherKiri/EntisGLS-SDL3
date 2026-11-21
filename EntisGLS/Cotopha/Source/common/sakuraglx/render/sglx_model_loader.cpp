@@ -5,6 +5,7 @@
 #include <sakuraglx/sglx3d_render.h>
 #include <sakuraglx/render/sglx_model_loader.h>
 #include <sakuraglx/extra/sglx_model_gltf_importer.h>
+#include <climits>
 
 using namespace SSystem ;
 using namespace SakuraGL ;
@@ -2236,8 +2237,15 @@ SGLError S3DStdXMLModelLoader::ParseMeshTag
 			return	sglErrFailed ;
 		}
 		size_t	i, j ;
-		size_t	countPolygon = (size_t) pxmlTag->GetAttrIntegerAs( L"polygons" ) ;
-		size_t	countVertex = (size_t) pxmlTag->GetAttrIntegerAs( L"vertics" ) ;
+		const auto polygonCount = pxmlTag->GetAttrIntegerAs( L"polygons" ) ;
+		const auto vertexCount = pxmlTag->GetAttrIntegerAs( L"vertics" ) ;
+		if ( polygonCount < 0 || polygonCount > INT_MAX / 3
+			|| vertexCount < 0 || vertexCount > INT_MAX / 3 )
+		{
+			return sglErrFailed ;
+		}
+		const size_t countPolygon = (size_t) polygonCount ;
+		const size_t countVertex = (size_t) vertexCount ;
 		size_t	countExAttr = (size_t) pxmlTag->GetAttrIntegerAs( L"ex_attr_count" ) ;
 		//
 		SXMLDocument::AttrInteger	aiPrimitiveTypes[] =
@@ -2266,9 +2274,7 @@ SGLError S3DStdXMLModelLoader::ParseMeshTag
 		SStringParser	sparsList ;
 		double *		pBufNum = bufNumber.GetArray( countVertex * 3 ) ;
 		int64_t *		pBufInt =
-			bufInteger.GetArray
-				( (size_t) esl_max( (int) countPolygon * 3,
-										(int) countVertex * 2 ) ) ;
+			bufInteger.GetArray( esl_max( countPolygon * 3, countVertex * 2 ) ) ;
 		//
 		S3DVector4 *	pvVertex = bufVertex.GetArray( countVertex ) ;
 		sparsList = pxmlTag->GetContentsAsString( L"vertex" ) ;

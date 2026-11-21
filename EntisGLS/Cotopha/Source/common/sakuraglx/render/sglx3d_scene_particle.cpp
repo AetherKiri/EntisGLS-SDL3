@@ -820,9 +820,8 @@ void S3DParticleSerializer::GenerateParticlesOnMesh
 			(size_t) m_randomizer.QuickRandomize
 						( (uint32_t) pMeshVertexCount[iNextMesh] ) ;
 		//
-		S3DVertexBufferInterface::MeshInfo	info ;
-		eslFillMemory
-			( &info, 0, sizeof(S3DVertexBufferInterface::MeshInfo) ) ;
+		S3DVertexBufferInterface::MeshInfo	info {} ;
+		info.vCenter = S3DVector( 0, 0, 0 ) ;
 		//
 		S3DVector4	vVertex, vNormal ;
 		S2DVector	vUVMap ;

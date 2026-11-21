@@ -1,4 +1,5 @@
 ﻿
+#include <memory>
 #include <sakuragl/sakuragl.h>
 #include <sakuragl/sgl3d/sgl_render_parameter_context.h>
 #include <sakuragl/sgl3d/sgl_render_buffer.h>
@@ -115,7 +116,7 @@ void S3DTemporaryNormalBuffer::SetForIndexedTriangleList
 		const uint32_t * pIndexedList )
 {
 	S3DVector4 *	pNormalBuf = m_bufNormals.GetArray( countVertex ) ;
-	eslFillMemory( pNormalBuf, 0, countVertex * sizeof(S3DVector4) ) ;
+	std::uninitialized_fill_n( pNormalBuf, countVertex, S3DVector4(0, 0, 0, 0) ) ;
 	//
 	size_t	i, j ;
 	for ( i = 0, j = 0; i < countPolygon; i ++, j += 3 )
@@ -172,7 +173,7 @@ void S3DTemporaryNormalBuffer::SetForTriangleStrip
 {
 	size_t countVertex = countTriangleStrip + 2 ;
 	S3DVector4 *	pNormalBuf = m_bufNormals.GetArray( countVertex ) ;
-	eslFillMemory( pNormalBuf, 0, countVertex * sizeof(S3DVector4) ) ;
+	std::uninitialized_fill_n( pNormalBuf, countVertex, S3DVector4(0, 0, 0, 0) ) ;
 	//
 	uint32_t	i ;
 	for ( i = 0; i < countTriangleStrip; i ++ )
@@ -267,8 +268,8 @@ void S3DTemporaryTextureAxisBuffer::SetForIndexedTriangleList
 	S3DVector4 *	pBufAxisX = m_bufAxisX.GetArray( countVertex ) ;
 	S3DVector4 *	pBufAxisY = m_bufAxisY.GetArray( countVertex ) ;
 	int32_t *		pBufCount = m_bufCount.GetArray( countVertex ) ;
-	eslFillMemory( pBufAxisX, 0, countVertex * sizeof(S3DVector4) ) ;
-	eslFillMemory( pBufAxisY, 0, countVertex * sizeof(S3DVector4) ) ;
+	std::uninitialized_fill_n( pBufAxisX, countVertex, S3DVector4(0, 0, 0, 0) ) ;
+	std::uninitialized_fill_n( pBufAxisY, countVertex, S3DVector4(0, 0, 0, 0) ) ;
 	eslFillMemory( pBufCount, 0, countVertex * sizeof(int32_t) ) ;
 	//
 	size_t	i, j ;
@@ -325,8 +326,8 @@ void S3DTemporaryTextureAxisBuffer::SetForTriangleStrip
 	S3DVector4 *	pBufAxisX = m_bufAxisX.GetArray( countVertex ) ;
 	S3DVector4 *	pBufAxisY = m_bufAxisY.GetArray( countVertex ) ;
 	int32_t *		pBufCount = m_bufCount.GetArray( countVertex ) ;
-	eslFillMemory( pBufAxisX, 0, countVertex * sizeof(S3DVector4) ) ;
-	eslFillMemory( pBufAxisY, 0, countVertex * sizeof(S3DVector4) ) ;
+	std::uninitialized_fill_n( pBufAxisX, countVertex, S3DVector4(0, 0, 0, 0) ) ;
+	std::uninitialized_fill_n( pBufAxisY, countVertex, S3DVector4(0, 0, 0, 0) ) ;
 	eslFillMemory( pBufCount, 0, countVertex * sizeof(int32_t) ) ;
 	//
 	uint32_t	i ;
@@ -1886,14 +1887,8 @@ void S3DRenderBuffer::NormalizeVertexElements
 					entry.countPrimitive, entry.countVertex,
 					entry.pvVertex, entry.pvUVMap, entry.pIndexedList ) )
 		{
-			eslCopyMemory
-				( entry.pvTexAxisX,
-					m_bufTempTexAxis.GetBufferAxisX(),
-					entry.countVertex * sizeof(S3DVector4) ) ;
-			eslCopyMemory
-				( entry.pvTexAxisY,
-					m_bufTempTexAxis.GetBufferAxisY(),
-					entry.countVertex * sizeof(S3DVector4) ) ;
+			std::uninitialized_copy_n( m_bufTempTexAxis.GetBufferAxisX(), entry.countVertex, entry.pvTexAxisX ) ;
+			std::uninitialized_copy_n( m_bufTempTexAxis.GetBufferAxisY(), entry.countVertex, entry.pvTexAxisY ) ;
 		}
 		m_csBufSync.Unlock() ;
 	}
@@ -1944,24 +1939,16 @@ void S3DRenderBuffer::MorphMeshVertics( S3DRenderBuffer::RENDER_ENTRY& entry )
 		//
 		// モーフィング無し
 		//
-		eslCopyMemory
-			( entry.pvTempVertex, entry.pvVertex,
-						countVertex * sizeof(S3DVector4) ) ;
-		eslCopyMemory
-			( entry.pvTempNormal, entry.pvNormal,
-						countVertex * sizeof(S3DVector4) ) ;
+		std::uninitialized_copy_n( entry.pvVertex, countVertex, entry.pvTempVertex ) ;
+		std::uninitialized_copy_n( entry.pvNormal, countVertex, entry.pvTempNormal ) ;
 		//
 		if ( entry.pvUVMap != NULL )
 		{
-			eslCopyMemory
-				( entry.pvTempUVMap, entry.pvUVMap,
-							countVertex * sizeof(S2DVector) ) ;
+			std::uninitialized_copy_n( entry.pvUVMap, countVertex, entry.pvTempUVMap ) ;
 		}
 		if ( entry.pColor != NULL )
 		{
-			eslCopyMemory
-				( entry.pvTempColor, entry.pColor,
-							countVertex * sizeof(S3DColor) ) ;
+			std::uninitialized_copy_n( entry.pColor, countVertex, entry.pvTempColor ) ;
 		}
 	}
 	else
@@ -1969,19 +1956,15 @@ void S3DRenderBuffer::MorphMeshVertics( S3DRenderBuffer::RENDER_ENTRY& entry )
 		//
 		// モーフィング処理
 		//
-		eslFillMemory
-			( entry.pvTempVertex, 0, countVertex * sizeof(S3DVector4) ) ;
-		eslFillMemory
-			( entry.pvTempNormal, 0, countVertex * sizeof(S3DVector4) ) ;
+		std::uninitialized_fill_n( entry.pvTempVertex, countVertex, S3DVector4(0, 0, 0, 0) ) ;
+		std::uninitialized_fill_n( entry.pvTempNormal, countVertex, S3DVector4(0, 0, 0, 0) ) ;
 		if ( entry.pvUVMap != NULL )
 		{
-			eslFillMemory
-				( entry.pvTempUVMap, 0, countVertex * sizeof(S2DVector) ) ;
+			std::uninitialized_fill_n( entry.pvTempUVMap, countVertex, S2DVector(0, 0) ) ;
 		}
 		if ( entry.pColor != NULL )
 		{
-			eslFillMemory
-				( entry.pvTempColor, 0, countVertex * sizeof(S3DColor) ) ;
+			std::uninitialized_fill_n( entry.pvTempColor, countVertex, S3DColor(0, 0) ) ;
 		}
 		S3DVector4 *	pvVertexBuf = entry.pvTempVertex ;
 		S3DVector4 *	pvNormalBuf = entry.pvTempNormal ;
@@ -2155,23 +2138,19 @@ void S3DRenderBuffer::MorphMeshInfoVertics
 	//
 	if ( info.pvVertex != NULL )
 	{
-		eslFillMemory
-			( info.pvVertex, 0, nCount * sizeof(S3DVector4) ) ;
+		std::uninitialized_fill_n( info.pvVertex, nCount, S3DVector4(0, 0, 0, 0) ) ;
 	}
 	if ( info.pvNormal != NULL )
 	{
-		eslFillMemory
-			( info.pvNormal, 0, nCount * sizeof(S3DVector4) ) ;
+		std::uninitialized_fill_n( info.pvNormal, nCount, S3DVector4(0, 0, 0, 0) ) ;
 	}
 	if ( (info.pvUVMap != NULL) && (entry.pvUVMap != NULL) )
 	{
-		eslFillMemory
-			( info.pvUVMap, 0, nCount * sizeof(S2DVector) ) ;
+		std::uninitialized_fill_n( info.pvUVMap, nCount, S2DVector(0, 0) ) ;
 	}
 	if ( (info.pColor != NULL) && (entry.pColor != NULL) )
 	{
-		eslFillMemory
-			( info.pColor, 0, nCount * sizeof(S3DColor) ) ;
+		std::uninitialized_fill_n( info.pColor, nCount, S3DColor(0, 0) ) ;
 	}
 	if ( entry.flagMorphWithWeight )
 	{
@@ -2370,10 +2349,8 @@ void S3DRenderBuffer::TransformMeshVerticsByBone
 	entry.pvTempVertex = entry.pvTempBoneVertex ;
 	entry.pvTempNormal = entry.pvTempBoneNormal ;
 	//
-	eslFillMemory
-		( entry.pvTempVertex, 0, countVertex * sizeof(S3DVector4) ) ;
-	eslFillMemory
-		( entry.pvTempNormal, 0, countVertex * sizeof(S3DVector4) ) ;
+	std::uninitialized_fill_n( entry.pvTempVertex, countVertex, S3DVector4(0, 0, 0, 0) ) ;
+	std::uninitialized_fill_n( entry.pvTempNormal, countVertex, S3DVector4(0, 0, 0, 0) ) ;
 	//
 	if ( entry.ppJointMap != NULL )
 	{
@@ -2434,10 +2411,8 @@ void S3DRenderBuffer::TransformMeshVerticsByBone
 			(S3DVector4*) m_bufRender.Allocate
 							( countVertex * sizeof(S3DVector4) ) ;
 	}
-	eslFillMemory
-		( entry.pvTempBoneVertex + iFirst, 0, nCount * sizeof(S3DVector4) ) ;
-	eslFillMemory
-		( entry.pvTempBoneNormal + iFirst, 0, nCount * sizeof(S3DVector4) ) ;
+	std::uninitialized_fill_n( entry.pvTempBoneVertex + iFirst, nCount, S3DVector4(0, 0, 0, 0) ) ;
+	std::uninitialized_fill_n( entry.pvTempBoneNormal + iFirst, nCount, S3DVector4(0, 0, 0, 0) ) ;
 	//
 	if ( entry.ppJointMap != NULL )
 	{
@@ -2491,17 +2466,11 @@ void S3DRenderBuffer::TransformMeshVerticsByBone
 	}
 	if ( info.pvVertex != NULL )
 	{
-		eslCopyMemory
-			( info.pvVertex,
-				entry.pvTempBoneVertex + iFirst,
-				nCount * sizeof(S3DVector4) ) ;
+		std::uninitialized_copy_n( entry.pvTempBoneVertex + iFirst, nCount, info.pvVertex ) ;
 	}
 	if ( info.pvNormal != NULL )
 	{
-		eslCopyMemory
-			( info.pvNormal,
-				entry.pvTempBoneNormal + iFirst,
-				nCount * sizeof(S3DVector4) ) ;
+		std::uninitialized_copy_n( entry.pvTempBoneNormal + iFirst, nCount, info.pvNormal ) ;
 	}
 }
 
@@ -2689,8 +2658,8 @@ SGLError S3DRenderBuffer::GetMeshBufferAsSinglePrimitiveOfVB
 	const size_t	nCount = vb.GetMeshCount() ;
 	for ( size_t iMesh = 0; iMesh < nCount; iMesh ++ )
 	{
-		S3DVertexBufferInterface::MeshInfo	miMesh ;
-		eslFillMemory( &miMesh, 0, sizeof(miMesh) ) ;
+		S3DVertexBufferInterface::MeshInfo	miMesh {} ;
+		miMesh.vCenter = S3DVector( 0, 0, 0 ) ;
 		//
 		if ( vb.GetMeshInfoAt( miMesh, iMesh, 0 ) )
 		{
@@ -3855,8 +3824,8 @@ SGLError S3DRenderBuffer::AddVertexBuffer
 	//
 	// ｚソート用領域判定
 	//
-	MeshInfo	mshinf ;
-	eslFillMemory( &mshinf, 0, sizeof(MeshInfo) ) ;
+	MeshInfo	mshinf {} ;
+	mshinf.vCenter = S3DVector( 0, 0, 0 ) ;
 	pBuffer->GetMeshInfoAt( mshinf, iFirst, 0 ) ;
 	//
 	if ( iFirst + 1 < (size_t) iEnd )
@@ -4676,9 +4645,7 @@ SGLError S3DRenderBuffer::SetMorphingTargetMesh
 	}
 	else
 	{
-		eslFillMemory
-			( pre->pvMorphUVMap + iFirst,
-				0, countVertex * sizeof(S2DVector) ) ;
+		std::uninitialized_fill_n( pre->pvMorphUVMap + iFirst, countVertex, S2DVector(0, 0) ) ;
 	}
 	if ( pColor != NULL )
 	{

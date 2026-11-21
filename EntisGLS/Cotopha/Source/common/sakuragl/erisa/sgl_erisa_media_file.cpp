@@ -6,6 +6,7 @@
  *****************************************************************************/
 
 
+#include <memory>
 #include <sakuraglx/sakuraglx.h>
 #include <sakuragl/sgl_erisa_lib.h>
 #include <sakuragl/sgl2d/sgl_image_buf_object.h>
@@ -601,9 +602,7 @@ SSystem::SError SGLMediaFile::OpenMediaFile
 				(size_t) GetCurrentChunkLength() / sizeof(SGLPalette) ;
 			m_tablePalette.SetLength( nPaletteLength ) ;
 			//
-			eslFillMemory
-				( m_tablePalette.GetArray(),
-					0, nPaletteLength * sizeof(SGLPalette) ) ;
+			std::uninitialized_fill_n( m_tablePalette.GetArray(), nPaletteLength, SGLPalette(uint32_t(0)) ) ;
 			Read( m_tablePalette.GetArray(),
 					nPaletteLength * sizeof(SGLPalette) ) ;
 			m_tablePalette.FinishArray() ;

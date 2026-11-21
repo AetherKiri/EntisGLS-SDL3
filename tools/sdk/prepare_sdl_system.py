@@ -156,6 +156,11 @@ def files(source):
     source = replace_once(source,
         "mode_t\tmode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH ;",
         "mode_t\tmode = S_IRWXU ; // Newly created private directories must be searchable.")
+    source = replace_once(source, "ftruncate( m_fdFile, 0 ) ;", """if ( ftruncate( m_fdFile, 0 ) != 0 )
+                {
+                    Close();
+                    return errFailed;
+                }""")
     return source
 
 

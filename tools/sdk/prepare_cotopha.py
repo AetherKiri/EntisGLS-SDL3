@@ -28,6 +28,7 @@ from patch_legacy_heap_state import patch_source as patch_heap_state
 from patch_legacy_primary_context import patch_source as patch_primary_context
 from patch_legacy_reference_commit import patch_source as patch_reference_commit
 from patch_legacy_context_failure import patch_source as patch_context_failure
+from patch_legacy_switch_defaults import patch_source as patch_switch_defaults
 
 p = argparse.ArgumentParser()
 p.add_argument("--legacy", type=Path, required=True)
@@ -84,6 +85,20 @@ for component in ("ESL", "GLS3", "erisalib", "EGL"):
             # ReplaceWords uses an undeclared _Obj as its map key type.
             text = text.replace("ETaggedElement<_Obj,_CObj>", "ETaggedElement<EString,_CObj>", 1)
             text = text.replace("ETaggedElement<_Obj,_CObj>", "ETaggedElement<EWideString,_CObj>", 1)
+            # AllocString reports allocation failure with a null buffer.
+            # Neither constructor can proceed with the copy in that case.
+            allocation = "AllocString( m_nLength + (m_nLength >> 1) + 1 ) ;"
+            split = text.index("~EGenString( void )")
+            constructors = text[:split]
+            assert constructors.count(allocation) == 2
+            text = ("#include <new>\n" + constructors.replace(
+                allocation, allocation + "\n\t\t\t\tif ( m_pszString == NULL ) throw std::bad_alloc() ;"
+            ) + text[split:])
+        if source.name == "glscs_compiler.cpp":
+            text = text.replace("(matchResult == ECSTypeInfo::typeNoMatch)\n", "matchResult == ECSTypeInfo::typeNoMatch\n")
+            text = text.replace("if ( /*(csomClass == csomGlobal) ||*/ (csomClass == csomThis) )", "if ( csomClass == csomThis )")
+        if source.name == "glscsobj_object.cpp":
+            text = text.replace("(m_vtType == csvtReference)\n", "m_vtType == csvtReference\n")
         if source.name == "glsscript.h":
             text = text.replace("#include <ctscriptplugin.h>", "#include <ctscriptplugin.h>\n#include <legacy_file_pi.h>")
             # Keep the VM + object declarations, without pulling in the Windows
@@ -193,7 +208,17 @@ for component in ("ESL", "GLS3", "erisalib", "EGL"):
     OutputDebugString("GLS3 x86 JIT disabled; using the portable interpreter");
 }
 \n''' + text[end:]
+        if source.name == "eslstring.cpp":
+            text = re.sub(r'(WideCharToMultiByte\s*\(\s*ptrString,\s*(?:nLength|-1),\s*NULL,\s*)NULL', r'\g<1>0', text)
+        if source.name == "glscs_compiler.cpp":
+            text = re.sub(r'(CompileExpression\( [^\n,]+, (?:cssExpr|cssLine), 0, )NULL( \))', r'\g<1>0\2', text)
+            old = 'opinf.uoptUnary < csctMax'
+            if text.count(old) != 1:
+                raise ValueError('SDK unary operator bounds check changed')
+            text = text.replace(old, 'opinf.uoptUnary < csuotMax')
         if source.name == "glscs_rosetta.cpp":
+            for index in ('nIndex', 'nFuncIndex'):
+                text = text.replace(f'(void*) {index}', f'reinterpret_cast<void *>(static_cast<intptr_t>({index}))')
             text = text.replace("#include <glscs_rosetta.h>", "#include <rosetta/rosetta.h>\n#include <glscs_rosetta.h>")
             text = text.replace("return\t!m_pObject->OperateInteger( number ) ;", "INT64 value = 0;\n const bool success = !m_pObject->OperateInteger(value);\n number = value;\n return success;")
             text = text.replace("(int) pInstance", "static_cast<int>(reinterpret_cast<intptr_t>(pInstance))")
@@ -235,4 +260,5 @@ for component in ("ESL", "GLS3", "erisalib", "EGL"):
         text = patch_primary_context(str(source.relative_to(a.legacy)), text)
         text = patch_reference_commit(str(source.relative_to(a.legacy)), text)
         text = patch_context_failure(str(source.relative_to(a.legacy)), text)
+        text = patch_switch_defaults(str(source.relative_to(a.legacy)), text)
         write_if_changed(target, text)

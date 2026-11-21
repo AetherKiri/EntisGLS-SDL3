@@ -3624,9 +3624,8 @@ void S3DScene::ModelItem::RenderLocalModelWithReq
 		{
 			nMeshCount = (size_t) iEndMesh - iFirstMesh ;
 		}
-		S3DVertexBufferInterface::MeshInfo	inf ;
-		eslFillMemory
-			( &inf, 0, sizeof(S3DVertexBufferInterface::MeshInfo) ) ;
+		S3DVertexBufferInterface::MeshInfo	inf {} ;
+		inf.vCenter = S3DVector( 0, 0, 0 ) ;
 		size_t	iLast = iFirstMesh ;
 		for ( size_t i = 0; i < nMeshCount; i ++ )
 		{

@@ -17,7 +17,7 @@ import subprocess
 import sys
 from entis_sdk import COTOPHA, ROOT
 from prepare_sdl_window import prepare as prepare_window, write
-from prepare_sdl_system import replace_body
+from prepare_sdl_system import replace_body, replace_once
 from prepare_sdl_graphics import transform_context
 
 
@@ -58,6 +58,14 @@ def main():
     source_copy('Source/common/sakuragl/media/sgl_sound_player.cpp', lambda s:
         s.replace('#error no implement SGLSoundPlayer::Open',
                   '// SDL startup registers a real SGLSoundPlayerInterface creator.'))
+    def script_sound_player(s):
+        old = '#warning\tno implement SakuraGL::SoundPlayer'
+        return '#include "platform/sdl/sdl_sound_player.h"\n' + replace_once(
+            s, old, 'pPlayer = new SakuraGL::SGLSDLSoundPlayer ;')
+    source_copy('Source/common/glscs/glscs_sakura2_obj_sound.cpp', script_sound_player)
+    source_copy('Source/common/sakuragl/sgl3d/sgl_render_device.cpp', lambda s:
+        replace_once(s, 'eslFillMemory( &m_ssi, 0, sizeof(m_ssi) ) ;',
+                     'm_ssi = {};\n\tm_ssi.dimLocalSize = DimSize(0, 0, 0);'))
     source_copy('Source/common/sakuragl/media/sgl_sound_recorder.cpp', lambda s:
         s.replace('#error no implement SGLSoundRecorder::EnumerateDevices',
                   'if (pwNameBuf && nNameBufLength) pwNameBuf[0] = 0;')
@@ -91,7 +99,9 @@ def main():
         if s.count(old) != 1: raise ValueError('SDK stock font ownership block changed')
         # This branch already released QuickLock. Failed stock creation must
         # not fall through into the second unlock and a missing system backend.
-        return s.replace(old, old + '\n\t\t\treturn sglErrFailed;')
+        return s.replace(old, old + '\n\t\t\treturn sglErrFailed;').replace(
+            '#warning no implement font rasterizer',
+            '// SDL fonts are resolved through the registered stock above.')
     source_copy('Source/common/sakuragl/sgl2d/sgl_font.cpp', font)
     def fixed_pitch_lettering(s):
         # Fixed character advance changes width, not the glyph cell height.
@@ -194,13 +204,51 @@ for (size_t i = 0; variables[i]; ++i) {
 SDL_free(variables);
 ''')
     source_copy('Source/common/sakuraglx/sglx_std_app.cpp', std_application)
+
+    def scene_composer(text):
+        # An invalid model cannot resolve a bone. Keep the pose stream alive
+        # while the XML fallback rewinds and reads it after a binary parse failure.
+        text = replace_once(text,
+            'if ( pModelItem != nullptr )\n\t\t\t\t{\n\t\t\t\t\treturn\tnullptr ;',
+            'if ( pModelItem == nullptr )\n\t\t\t\t{\n\t\t\t\t\treturn\tnullptr ;')
+        return replace_once(text,
+            'pPoseLib->ReadLibrary( *pFile ) ;\n\tpFile = nullptr ;',
+            'pPoseLib->ReadLibrary( *pFile ) ;')
+    source_copy('Source/common/sakuraglx/render/sglx3d_scene_composer.cpp', scene_composer)
+
+    def rosetta_media(text):
+        # Attach the cloned player only after the native wrapper cast succeeds.
+        old = 'if ( pNativeObj != NULL )\n\t{\n\t\tdelete\tpClone ;\n\t\treturn\tpObj ;'
+        return replace_once(text, old, old.replace('!=', '=='))
+    source_copy('Source/common/rosetta/rosetta_media.cpp', rosetta_media)
     loquaty_file = ROOT/'vendor/official-loquaty/Loquaty/source/loquaty_file.cpp'
     loquaty_text = loquaty_file.read_text(encoding='utf-8-sig')
     loquaty_text = loquaty_text.replace('lseek64', 'lseek').replace('off64_t', 'off_t')
+    loquaty_text = replace_once(loquaty_text, 'ftruncate( m_file, 0 ) ;', """if ( ftruncate( m_file, 0 ) != 0 )
+        {
+            Close();
+            return false;
+        }""")
+    loquaty_text = replace_once(loquaty_text, 'ftruncate( m_file, GetPosition() ) ;', """if ( ftruncate( m_file, GetPosition() ) != 0 )
+        {
+            LTrace( "failed to truncate file (error=%d)\\n", errno );
+        }""")
     write(out/'loquaty/loquaty_file.cpp', loquaty_text)
     records.append({'source': str(loquaty_file.relative_to(ROOT)),
         'sha256': hashlib.sha256(loquaty_file.read_bytes()).hexdigest(),
         'output': 'loquaty/loquaty_file.cpp'})
+
+    compiler_name = 'loquaty_compiler_expression.cpp'
+    compiler_source = ROOT/'vendor/official-loquaty/Loquaty/source'/compiler_name
+    compiler_text = compiler_source.read_text(encoding='utf-8-sig')
+    # A primitive array has no structure class to name in this diagnostic.
+    primitive_branch = compiler_text.index('if ( typeNewElement.IsPrimitive() )')
+    compiler_text = compiler_text[:primitive_branch] + replace_once(compiler_text[primitive_branch:],
+        'pStructClass->GetFullClassName().c_str()', 'typeNewElement.GetTypeName().c_str()')
+    write(out/'loquaty'/compiler_name, compiler_text)
+    records.append({'source': str(compiler_source.relative_to(ROOT)),
+        'sha256': hashlib.sha256(compiler_source.read_bytes()).hexdigest(),
+        'output': 'loquaty/' + compiler_name})
 
     for name, count in (('loquaty_cls_clock.cpp', 3), ('loquaty_date_time.cpp', 2)):
         clock_source = ROOT/'vendor/official-loquaty/Loquaty/source'/name
@@ -266,6 +314,44 @@ static int EntisTimespecGet(std::timespec* value) {
             if src.suffix not in ('.h', '.hpp', '.cpp'): continue
             relative = src.relative_to(COTOPHA)
             source_copy(relative, graphics)
+
+    custom_shader = out/'Source/opengl/sakuragl/sgl_opengl_custom_shader.cpp'
+    text, count = re.subn(r'eslFillMemory\s*\( &source, 0, sizeof\(S3DRenderDevice::ShaderSourceInfo\) \) ;',
+        'source = {};\n\tsource.dimLocalSize = S3DRenderDevice::DimSize(0, 0, 0);', generated[custom_shader])
+    if count != 14: raise ValueError('SDK custom shader initialization changed')
+    generated[custom_shader] = text
+
+    # The normal buffer holds C++ objects. SArray uses raw allocation and
+    # byte-wise initialization, so use a container that constructs its elements.
+    render_header = out/'Include/opengl/sakuragl/sgl_opengl_render_context.h'
+    text = replace_once(generated[render_header],
+        'namespace\tSakuraGL', '#include <vector>\n\nnamespace\tSakuraGL')
+    generated[render_header] = replace_once(text,
+        'SSystem::SArray<S3DVector4>\tm_bufNormal ;', 'std::vector<S3DVector4>\tm_bufNormal ;')
+
+    render_context = out/'Source/opengl/sakuragl/sgl_opengl_render_context.cpp'
+    text = generated[render_context]
+    for index in ('m_sviView', 'sviView'):
+        text = replace_once(text, f'ESLAssert( ({index} >= 0) && ({index} < 2) ) ;',
+            f'ESLAssert( ({index} == stereoViewRight) || ({index} == stereoViewLeft) ) ;')
+    for old, new in (
+        ('GetLength()', 'size()'),
+        ('SetLength( (countVertex + 0xFF) & ~0xFF )',
+         'resize( (countVertex + 0xFF) & ~0xFF, S3DVector4(0, 0, 0, 0) )'),
+        ('GetArray()', 'data()'),
+    ):
+        old, new = f'm_bufNormal.{old}', f'm_bufNormal.{new}'
+        if text.count(old) != 2: raise ValueError(f'SDK normal buffer access changed: {old}')
+        text = text.replace(old, new)
+    text, count = re.subn(r'^[\t ]*m_bufNormal\.FinishArray\(\) ;\n', '', text, flags=re.MULTILINE)
+    if count != 2: raise ValueError('SDK normal buffer release changed')
+    # The SDK accumulates normals into this array after clearing all four
+    # components. The default constructor does not clear x, y and z.
+    text = replace_once(text,
+        'eslFillMemory\n\t\t\t\t( pvBufNormal, 0, countVertex * sizeof(S3DVector4) ) ;',
+        'for (size_t i = 0; i < countVertex; ++i)\n'
+        '\t\t\t\tpvBufNormal[i] = S3DVector4(0, 0, 0, 0);')
+    generated[render_context] = text
 
     producer = out/'Source/opengl/sakuragl/sgl_opengl_window_producer.cpp'
     text = generated[producer]

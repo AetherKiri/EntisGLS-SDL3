@@ -17,7 +17,7 @@ bool IsKnownStudySteady(const std::filesystem::path& gameDir) {
         const auto path = gameDir / "script.noa";
         const auto info = entis::io::Stat(path);
         if (info.kind != entis::io::FileInfo::Kind::File || info.size != archiveBytes) return false;
-        std::unique_ptr<std::FILE, decltype(&std::fclose)> input(entis::io::Open(path, "rb"), &std::fclose);
+        entis::io::File input(entis::io::Open(path, "rb"));
         // The existing SDK MD5 byte operations are independent of global SDK
         // state. Avoid its SString formatting helper before initialization.
         SakuraCL::MD5Context hash;

@@ -231,8 +231,8 @@ IMPL_LOQUATY_FUNC(EntisGLS4_VertexBuffer_getMeshInfoAt)
 	LQT_FUNC_ARG_ULONG( iFirstVertex ) ;
 	LQT_FUNC_ARG_UINT( flags ) ;
 
-	S3DVertexBufferInterface::MeshInfo	meshInfo ;
-	memset( &meshInfo, 0, sizeof(meshInfo) ) ;
+	S3DVertexBufferInterface::MeshInfo	meshInfo {} ;
+	meshInfo.vCenter = S3DVector( 0, 0, 0 ) ;
 	pVB->GetMeshInfoAt( meshInfo, (size_t) iMesh, 0, 0, flags ) ;
 
 	meshInfo.pvVertex =

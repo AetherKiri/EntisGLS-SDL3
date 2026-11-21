@@ -31,27 +31,23 @@ ESLObject::~ESLObject( void )
 // 有効判定
 bool ESLObject::IsValidESLObject( void ) const
 {
-	ESLAssert( this != NULL ) ;
-	if ( this != NULL )
+	#if	defined(_MSC_VER)
+	__try
 	{
-		#if	defined(_MSC_VER)
-		__try
+		if ( *((void**)this) != NULL )
 		{
-			if ( *((void**)this) != NULL )
-			{
-				return	(GetESLRuntimeClass() != NULL) ;
-			}
+			return	(GetESLRuntimeClass() != NULL) ;
 		}
-		__except( EXCEPTION_CONTINUE_EXECUTION )
-		{
-		}
-		#else
-			if ( *((void**)this) != NULL )
-			{
-				return	(GetESLRuntimeClass() != NULL) ;
-			}
-		#endif
 	}
+	__except( EXCEPTION_CONTINUE_EXECUTION )
+	{
+	}
+	#else
+		if ( *((void**)this) != NULL )
+		{
+			return	(GetESLRuntimeClass() != NULL) ;
+		}
+	#endif
 	return	false ;
 }
 

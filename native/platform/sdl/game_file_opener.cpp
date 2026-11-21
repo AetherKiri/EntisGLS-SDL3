@@ -281,7 +281,7 @@ public:
             if (!create && io::Stat(path).kind != io::FileInfo::Kind::File) return nullptr;
             FILE* file = io::Open(path, create ? "w+b" : write ? "r+b" : "rb");
             if (!file) return nullptr;
-            std::unique_ptr<FILE, decltype(&std::fclose)> pending(file, &std::fclose);
+            io::File pending(file);
             auto* stream = new DocumentFile(path, file, write);
             pending.release();
             return write ? stream : ShareReadOnlyFile(stream);

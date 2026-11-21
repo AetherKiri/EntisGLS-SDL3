@@ -12,6 +12,11 @@
 // Game resources may live in a user-authorized document provider rather than a
 // POSIX directory. This interface is independent of SDL/SDK initialization.
 namespace entis::io {
+struct CloseFile {
+    void operator()(std::FILE* file) const noexcept { std::fclose(file); }
+};
+using File = std::unique_ptr<std::FILE, CloseFile>;
+
 struct FileInfo {
     enum class Kind { Missing, File, Directory };
     Kind kind = Kind::Missing;
